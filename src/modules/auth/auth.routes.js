@@ -60,4 +60,47 @@ export async function authRoutes(fastify) {
   }, async (request) => ({
     user: auth.getProfile(request.user.sub)
   }));
+
+  fastify.patch("/profile", {
+    preHandler: async (request) => request.jwtVerify(),
+    schema: {
+      body: {
+        type: "object",
+        additionalProperties: false,
+        minProperties: 1,
+        properties: {
+          username: {
+            type: "string",
+            minLength: 3,
+            maxLength: 20,
+            pattern: "^[a-zA-Z0-9_]+$"
+          },
+          avatarUrl: {
+            anyOf: [
+              { type: "string", format: "uri", maxLength: 2048 },
+              { type: "null" }
+            ]
+          }
+        }
+      }
+    }
+  }, async (request) => ({
+    user: auth.updateProfile(request.user.sub, request.body)
+  }));
+
+  fastify.put("/password", {
+    preHandler: async (request) => request.jwtVerify(),
+    config: { rateLimit: { max: 5, timeWindow: "15 minutes" } },
+    schema: {
+      body: {
+        type: "object",
+        additionalProperties: false,
+        required: ["newPassword"],
+        properties: {
+          currentPassword: { type: "string", minLength: 1, maxLength: 72 },
+          newPassword: { type: "string", minLength: 8, maxLength: 72 }
+        }
+      }
+    }
+  }, async (request) => auth.changePassword(request.user.sub, request.body));
 }
