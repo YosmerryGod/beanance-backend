@@ -86,7 +86,9 @@ Available variables:
 | NODE_ENV | development | Runtime environment |
 | HOST | 0.0.0.0 | Server bind address |
 | PORT | 3000 | HTTP port |
-| DATABASE_PATH | ./storage/beanance.sqlite | SQLite database file path |\n| WALLET_ENCRYPTION_KEY | Required in production | 32-byte AES-256-GCM key for wallet secrets |\n| EXCHANGE_ENCRYPTION_KEY | Required in production | Separate 32-byte AES-256-GCM key for exchange API credentials |
+| DATABASE_PATH | ./storage/beanance.sqlite | SQLite database file path |
+| WALLET_ENCRYPTION_KEY | Required in production | 32-byte AES-256-GCM key for wallet secrets |
+| EXCHANGE_ENCRYPTION_KEY | Required in production | Separate 32-byte AES-256-GCM key for exchange API credentials |
 
 The storage directory is created automatically when the database is initialized. SQLite database files are excluded from Git.
 
@@ -129,7 +131,9 @@ npm test
 
 SQLite is used for the MVP to keep local development and deployment straightforward. The database connection is initialized in `src/db/index.js`.
 
-Generate a wallet encryption key with `openssl rand -hex 32`. Keep it outside source control and back it up securely. Losing this key makes stored wallet secrets permanently unrecoverable. Never reuse the JWT secret as the wallet encryption key.\n\nThe connection enables:
+Generate a wallet encryption key with `openssl rand -hex 32`. Keep it outside source control and back it up securely. Losing this key makes stored wallet secrets permanently unrecoverable. Never reuse the JWT secret as the wallet encryption key.
+
+The connection enables:
 
 - Write-Ahead Logging (WAL) mode.
 - Foreign-key enforcement.
