@@ -54,7 +54,7 @@ beanance-backend/
 └── package.json
 ```
 
-The authentication MVP now supports email/password registration and login, Google ID-token sign-in, JWT sessions, and a protected current-user endpoint. Strategy, token-gating, and copy-trading business logic are not implemented yet.
+The MVP supports email/password registration and login, Google ID-token sign-in, JWT sessions, protected profile management, and custodial BNB Smart Chain wallets. Strategy, token-gating, and copy-trading business logic are not implemented yet.
 
 ## Getting Started
 
@@ -86,7 +86,7 @@ Available variables:
 | NODE_ENV | development | Runtime environment |
 | HOST | 0.0.0.0 | Server bind address |
 | PORT | 3000 | HTTP port |
-| DATABASE_PATH | ./storage/beanance.sqlite | SQLite database file path |
+| DATABASE_PATH | ./storage/beanance.sqlite | SQLite database file path |\n| WALLET_ENCRYPTION_KEY | Required in production | 32-byte AES-256-GCM key encoded as 64 hexadecimal characters |
 
 The storage directory is created automatically when the database is initialized. SQLite database files are excluded from Git.
 
@@ -129,7 +129,7 @@ npm test
 
 SQLite is used for the MVP to keep local development and deployment straightforward. The database connection is initialized in `src/db/index.js`.
 
-The connection enables:
+Generate a wallet encryption key with `openssl rand -hex 32`. Keep it outside source control and back it up securely. Losing this key makes stored wallet secrets permanently unrecoverable. Never reuse the JWT secret as the wallet encryption key.\n\nThe connection enables:
 
 - Write-Ahead Logging (WAL) mode.
 - Foreign-key enforcement.
@@ -218,3 +218,23 @@ Trading digital assets involves substantial risk and can result in the loss of c
 ## License
 
 No license has been specified yet. All rights are reserved by the copyright holder until a license is added.
+
+
+## Custodial BNB Smart Chain Wallet API
+
+All wallet endpoints require a valid JWT. Each account can own multiple wallets, with exactly one primary wallet when at least one wallet exists. Wallet records are scoped to the authenticated user.
+
+| Method | Endpoint | Purpose |
+| --- | --- | --- |
+| POST | `/api/v1/wallets/create` | Generate a new BSC wallet |
+| POST | `/api/v1/wallets/import` | Import using a private key or mnemonic phrase |
+| GET | `/api/v1/wallets` | List the current user's wallets |
+| GET | `/api/v1/wallets/:walletId` | Read wallet metadata |
+| PATCH | `/api/v1/wallets/:walletId/primary` | Set the primary wallet |
+| DELETE | `/api/v1/wallets/:walletId` | Delete a wallet |
+
+The wallet API uses ethers v6 and BNB Smart Chain mainnet (chain ID 56). Private keys and available mnemonic phrases are encrypted at rest with AES-256-GCM. The encryption key is supplied through `WALLET_ENCRYPTION_KEY`; it must be a 32-byte key represented by 64 hexadecimal characters. The development fallback key is for local development only and must never be used in production.
+
+The create endpoint returns the newly generated recovery phrase once so the user can back it up. Import endpoints never return the submitted private key or mnemonic. Standard wallet listing and detail endpoints return public metadata only. A dedicated, re-authenticated secret-export flow should be implemented before offering users the ability to reveal stored secrets later.
+
+**Custodial security note:** Beanance controls the server-side encryption key and can technically access user wallet keys. Protect the server, database backups, environment secrets, and deployment access accordingly. Do not log request bodies for wallet import or wallet creation responses.
