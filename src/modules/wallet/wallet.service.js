@@ -26,6 +26,8 @@ function publicWallet(wallet) {
   return {
     id: wallet.id,
     address: wallet.address,
+    chainId: wallet.chain_id,
+    network: "BNB Smart Chain",
     isPrimary: wallet.is_primary === 1,
     createdAt: wallet.created_at
   };
