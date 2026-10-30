@@ -1,8 +1,11 @@
 import Fastify from "fastify";
 import helmet from "@fastify/helmet";
+import jwt from "@fastify/jwt";
 import rateLimit from "@fastify/rate-limit";
+import { OAuth2Client } from "google-auth-library";
 import { registerRoutes } from "./routes/index.js";
 import { createDatabase } from "./db/index.js";
+import { createAuthService } from "./modules/auth/auth.service.js";
 
 export async function buildApp(config) {
   const fastify = Fastify({
@@ -13,14 +16,22 @@ export async function buildApp(config) {
   });
 
   const database = createDatabase(config.databasePath);
+  const googleClient = new OAuth2Client(config.googleClientId || undefined);
 
   fastify.decorate("database", database);
+  fastify.decorate(
+    "authService",
+    createAuthService(database, googleClient, config.googleClientId)
+  );
 
   fastify.addHook("onClose", async () => {
     database.close();
   });
 
   await fastify.register(helmet);
+  await fastify.register(jwt, {
+    secret: config.jwtSecret
+  });
   await fastify.register(rateLimit, {
     max: 100,
     timeWindow: "1 minute"
