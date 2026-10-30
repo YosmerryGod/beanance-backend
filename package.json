@@ -23,6 +23,7 @@
     "google-auth-library": "^10.3.0",
     "nodemailer": "^7.0.6",
     "ethers": "^6.15.0",
-    "ws": "^8.18.3"
+    "ws": "^8.18.3",
+    "@fastify/websocket": "^11.2.0"
   }
 }
