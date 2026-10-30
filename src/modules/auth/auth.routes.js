@@ -5,6 +5,13 @@ const emailSchema = {
   pattern: "^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$"
 };
 
+const verificationCodeSchema = {
+  type: "string",
+  minLength: 6,
+  maxLength: 6,
+  pattern: "^[0-9]{6}$"
+};
+
 export async function authRoutes(fastify) {
   const auth = fastify.authService;
 
@@ -22,9 +29,24 @@ export async function authRoutes(fastify) {
       }
     }
   }, async (request, reply) => {
-    const result = await auth.register(fastify, request.body);
-    return reply.code(201).send(result);
+    const result = await auth.register(request.body);
+    return reply.code(202).send(result);
   });
+
+  fastify.post("/register/verify", {
+    config: { rateLimit: { max: 10, timeWindow: "15 minutes" } },
+    schema: {
+      body: {
+        type: "object",
+        additionalProperties: false,
+        required: ["email", "code"],
+        properties: {
+          email: emailSchema,
+          code: verificationCodeSchema
+        }
+      }
+    }
+  }, async (request) => auth.verifyRegistration(fastify, request.body));
 
   fastify.post("/login", {
     config: { rateLimit: { max: 10, timeWindow: "15 minutes" } },
@@ -88,9 +110,9 @@ export async function authRoutes(fastify) {
     user: auth.updateProfile(request.user.sub, request.body)
   }));
 
-  fastify.put("/password", {
+  fastify.post("/password/request-code", {
     preHandler: async (request) => request.jwtVerify(),
-    config: { rateLimit: { max: 5, timeWindow: "15 minutes" } },
+    config: { rateLimit: { max: 3, timeWindow: "15 minutes" } },
     schema: {
       body: {
         type: "object",
@@ -102,5 +124,20 @@ export async function authRoutes(fastify) {
         }
       }
     }
-  }, async (request) => auth.changePassword(request.user.sub, request.body));
+  }, async (request) => auth.requestPasswordChange(request.user.sub, request.body));
+
+  fastify.post("/password/verify-code", {
+    preHandler: async (request) => request.jwtVerify(),
+    config: { rateLimit: { max: 5, timeWindow: "15 minutes" } },
+    schema: {
+      body: {
+        type: "object",
+        additionalProperties: false,
+        required: ["code"],
+        properties: {
+          code: verificationCodeSchema
+        }
+      }
+    }
+  }, async (request) => auth.verifyPasswordChange(request.user.sub, request.body));
 }
