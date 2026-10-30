@@ -2,164 +2,181 @@
 
 **The strategy launchpad and marketplace for algorithmic trading.**
 
-Beanance is a platform for creating, discovering, launching, and using algorithmic trading strategies. Each published strategy can have its own tradable strategy token, while token ownership can be used as an access requirement for copy trading.
+Beanance is an early-stage platform for creating, discovering, launching, and using algorithmic trading strategies. Each published strategy may be associated with a tradable strategy token, while token ownership can be used as an access requirement for copy trading.
 
-> **Project status:** Early development. Features described as planned are product direction, not a claim that they are already implemented.
+> **Project status:** MVP foundation. The current repository contains the initial Fastify application scaffold and SQLite connection. Business features are not implemented yet.
 
-## Overview
+## Technology Stack
 
-Beanance connects strategy creators with traders through two complementary products:
+- **Runtime:** Node.js 20+
+- **HTTP framework:** Fastify 5
+- **Database:** SQLite
+- **SQLite driver:** better-sqlite3
+- **Configuration:** dotenv
+- **Security middleware:** @fastify/helmet and @fastify/rate-limit
+- **Testing:** Node.js built-in test runner
 
-1. **Strategy Token Marketplace** — eligible strategies can be launched with their own token and traded by the community.
-2. **Token-Gated Copy Trading** — creators define the minimum number of their strategy tokens a user must hold to unlock copy trading.
+## MVP Architecture
 
-The goal is to help creators publish and build an audience around their strategies, while giving users transparent information to evaluate them.
+The backend uses a modular monolith. The application runs as one Node.js service, with code organized by responsibility so individual domains can evolve without introducing microservices prematurely.
 
-## Core Concepts
+```text
+beanance-backend/
+├── src/
+│   ├── app.js
+│   ├── server.js
+│   ├── config/
+│   │   └── env.js
+│   ├── db/
+│   │   ├── index.js
+│   │   └── migrations/
+│   ├── routes/
+│   │   ├── index.js
+│   │   └── health.js
+│   ├── modules/
+│   │   ├── auth/
+│   │   ├── users/
+│   │   ├── strategies/
+│   │   ├── token-gating/
+│   │   ├── copy-trading/
+│   │   ├── blockchain/
+│   │   └── shared/
+│   ├── middleware/
+│   ├── plugins/
+│   └── types/
+├── tests/
+│   ├── unit/
+│   └── integration/
+├── docs/
+├── storage/
+├── .env.example
+├── .gitignore
+└── package.json
+```
 
-### Strategy
+The domain folders are reserved for future MVP modules. No authentication, strategy, token-gating, or copy-trading business logic is implemented in this scaffold.
 
-A strategy is a published trading system with its own identity and configuration. A strategy profile is intended to include:
+## Getting Started
 
-- Name, description, creator, and supported markets.
-- Trading logic or execution configuration.
-- Backtest and live performance information, where available.
-- Risk metrics and execution status.
-- Associated strategy token, if launched.
-- Copy-trading eligibility requirements.
+### Requirements
 
-### Strategy Token
+- Node.js 20 or newer
+- npm
 
-A strategy may be associated with a dedicated token. The token can be traded independently from the strategy's execution service.
-
-Token price, market capitalization, liquidity, and trading activity are market data. They must not be presented as proof of strategy quality or future profitability.
-
-### Token-Gated Copy Trading
-
-When publishing or deploying a strategy, its creator configures the minimum token balance required to access copy trading.
-
-| Configuration | Example |
-| --- | --- |
-| Strategy | BTC Scalper |
-| Token | $SCALPER |
-| Minimum holding | 100 SCALPER |
-| Access condition | Wallet holds at least 100 tokens |
-
-The minimum is configured per strategy by its creator. Beanance should verify token ownership on the relevant chain and enforce the requirement on the server side. Frontend-only checks are not sufficient.
-
-The final access policy—including what happens when a user's balance falls below the requirement, how often balances are rechecked, and how open positions are handled—must be defined before production.
-
-## Product Modules
-
-| Module | Purpose |
-| --- | --- |
-| Authentication & Accounts | User identity, sessions, and account security |
-| Strategy Management | Create, configure, update, and publish strategies |
-| Strategy Discovery | Browse, search, and evaluate published strategies |
-| Strategy Token Integration | Associate strategies with token and market information |
-| Copy Trading Access | Verify token-holding requirements for strategy access |
-| Copy Trading Execution | Manage user subscriptions, allocations, and execution lifecycle |
-| Performance & Analytics | Present backtests, live results, and risk metrics |
-| Creator Tools | Manage published strategies and access requirements |
-
-> This list describes the intended product scope. Refer to the source code and API documentation for currently implemented functionality.
-
-## High-Level Workflow
-
-1. A creator builds and configures a trading strategy.
-2. The creator tests the strategy and reviews its risk and performance data.
-3. The creator publishes the strategy and, where supported, associates a strategy token.
-4. During deployment, the creator sets the minimum token balance required for copy trading.
-5. A user acquires the required strategy tokens.
-6. Beanance verifies the user's token balance and grants or denies copy-trading access.
-7. If access is granted, the user configures their allocation and risk limits before enabling execution.
-
-## Design Principles
-
-- **Creator-defined access:** each strategy creator sets the minimum token requirement for their strategy.
-- **Verifiable ownership:** token-gated permissions must be based on verifiable wallet balances.
-- **Clear separation:** owning a strategy token does not automatically mean owning the strategy, receiving its profits, or having unrestricted execution access.
-- **Transparent performance:** backtested and live results must be clearly distinguished, with fees, drawdowns, and relevant risk information disclosed.
-- **User-controlled risk:** copy trading should support user-defined allocation and risk limits.
-- **Secure execution:** exchange credentials and signing permissions must be protected and scoped to the minimum required permissions.
-
-## Architecture
-
-The backend is intended to serve as the platform's API and coordination layer for:
-
-- User accounts and authentication.
-- Strategy metadata and creator configuration.
-- Strategy publication and lifecycle management.
-- Token ownership verification.
-- Copy-trading authorization and execution coordination.
-- Performance data and analytics.
-
-Blockchain interactions, market data providers, and trading execution services should be isolated behind dedicated service modules or adapters. This keeps the core application independent from a specific chain, exchange, or execution provider.
-
-The exact implementation architecture and technology stack will be documented after they are established in the repository.
-
-## Development Setup
-
-The repository is currently in its initial documentation stage. Installation commands, runtime requirements, environment variables, database setup, migrations, and start scripts will be added once the backend implementation is available.
-
-Clone the repository:
+### Installation
 
 ```bash
 git clone https://github.com/YosmerryGod/beanance-backend.git
 cd beanance-backend
+npm install
 ```
 
-## Environment Variables
+### Environment
 
-No environment variable contract has been published yet. Do not assume variable names or credentials. Once application configuration is implemented, document every required variable in an `.env.example` file and describe its purpose here.
+Copy the example environment file:
 
-Never commit real API keys, private keys, exchange credentials, database passwords, or JWT secrets.
+```bash
+cp .env.example .env
+```
 
-## API Documentation
+Available variables:
 
-API routes and request/response examples will be documented as endpoints are implemented. An OpenAPI specification is recommended so frontend developers and integrators can explore the API consistently.
+| Variable | Default | Description |
+| --- | --- | --- |
+| NODE_ENV | development | Runtime environment |
+| HOST | 0.0.0.0 | Server bind address |
+| PORT | 3000 | HTTP port |
+| DATABASE_PATH | ./storage/beanance.sqlite | SQLite database file path |
 
-## Security Considerations
+The storage directory is created automatically when the database is initialized. SQLite database files are excluded from Git.
 
-Beanance is intended to coordinate access to financial trading functionality. Security must be treated as a core requirement.
+### Run the Server
 
-- Never request or store users' exchange withdrawal permissions.
-- Encrypt sensitive credentials at rest and restrict access to them.
-- Keep authorization checks on the backend; never trust client-provided token balances.
-- Validate token contract addresses, chain IDs, decimals, and balance responses.
-- Protect authentication and sensitive endpoints with rate limits and input validation.
-- Record security-relevant actions and changes to creator-defined access requirements.
-- Define safe behavior for revoked access and existing open positions.
-- Do not expose private keys or secrets in logs, API responses, or error messages.
+Development mode:
 
-## Risk Disclaimer
+```bash
+npm run dev
+```
 
-Trading digital assets involves substantial risk and can result in the loss of capital. Strategy performance, including backtested or historical results, does not guarantee future results.
+Production mode:
 
-A strategy token is a separate digital asset. Holding it should not be represented as a guarantee of profit, ownership of the creator's strategy, or entitlement to trading revenue unless explicit, legally reviewed terms establish those rights.
+```bash
+npm start
+```
 
-Users should understand the risks, fees, execution delays, slippage, and possible losses before enabling copy trading.
+### Health Check
+
+```bash
+curl http://localhost:3000/api/v1/health
+```
+
+Expected response:
+
+```json
+{
+  "status": "ok",
+  "service": "beanance-backend"
+}
+```
+
+### Run Tests
+
+```bash
+npm test
+```
+
+## Database
+
+SQLite is used for the MVP to keep local development and deployment straightforward. The database connection is initialized in `src/db/index.js`.
+
+The connection enables:
+
+- Write-Ahead Logging (WAL) mode.
+- Foreign-key enforcement.
+- A configurable busy timeout.
+
+Database schema and migrations will be introduced with the first data-backed feature. Do not store production database files in the repository.
+
+## Product Direction
+
+Beanance is planned around two connected products:
+
+1. **Strategy Token Marketplace** — creators can publish strategies and associate them with strategy tokens.
+2. **Token-Gated Copy Trading** — each creator can configure the minimum token balance required to access copy trading for their strategy.
+
+A strategy's token requirement must be verified by the backend against the relevant chain and token contract. Frontend-only balance checks are not sufficient.
+
+Owning a strategy token does not automatically imply ownership of the strategy, a right to profits, or entitlement to revenue sharing. Those rights require separate, explicit product terms.
+
+## Security Principles
+
+- Keep authorization checks on the backend.
+- Never trust token balances supplied by the client.
+- Never request exchange withdrawal permissions for copy-trading integrations.
+- Encrypt sensitive credentials at rest.
+- Never commit secrets, private keys, or database files.
+- Define safe behavior for revoked copy-trading access and existing open positions.
+- Clearly distinguish backtested performance from live trading results.
 
 ## Roadmap
 
-- [ ] Establish backend application structure and technology stack
+- [x] Initialize Fastify application
+- [x] Add SQLite connection layer
+- [x] Add versioned health endpoint
+- [x] Add initial automated tests
+- [ ] Add database migrations
 - [ ] Implement authentication and user accounts
-- [ ] Implement strategy creation and management
-- [ ] Implement strategy deployment configuration
+- [ ] Implement strategy creation and deployment
 - [ ] Add creator-defined minimum token requirements
 - [ ] Integrate on-chain token balance verification
-- [ ] Implement token-gated copy-trading authorization
-- [ ] Implement user allocation and risk controls
+- [ ] Implement token-gated copy-trading access
+- [ ] Add copy-trading execution and user risk controls
 - [ ] Add strategy performance and risk analytics
-- [ ] Publish API documentation
-- [ ] Add automated tests and production deployment documentation
 
-Roadmap items are subject to change as the project develops.
+## Risk Disclaimer
 
-## Contributing
-
-Contribution guidelines will be added when the development workflow is established. For substantial changes, open an issue first to discuss the proposed implementation.
+Trading digital assets involves substantial risk and can result in the loss of capital. Backtested or historical strategy performance does not guarantee future results. Strategy tokens are separate digital assets and should not be represented as guarantees of profit.
 
 ## License
 
-No license has been specified yet. Until a license is added to this repository, all rights are reserved by the copyright holder.
+No license has been specified yet. All rights are reserved by the copyright holder until a license is added.
