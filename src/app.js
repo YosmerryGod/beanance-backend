@@ -6,6 +6,7 @@ import { OAuth2Client } from "google-auth-library";
 import { registerRoutes } from "./routes/index.js";
 import { createDatabase } from "./db/index.js";
 import { createAuthService } from "./modules/auth/auth.service.js";
+import { createEmailSender } from "./modules/auth/email.service.js";
 
 export async function buildApp(config) {
   const fastify = Fastify({
@@ -17,11 +18,18 @@ export async function buildApp(config) {
 
   const database = createDatabase(config.databasePath);
   const googleClient = new OAuth2Client(config.googleClientId || undefined);
+  const emailSender = config.emailSender || createEmailSender(config);
 
   fastify.decorate("database", database);
   fastify.decorate(
     "authService",
-    createAuthService(database, googleClient, config.googleClientId)
+    createAuthService(
+      database,
+      googleClient,
+      config.googleClientId,
+      emailSender,
+      config.jwtSecret
+    )
   );
 
   fastify.addHook("onClose", async () => {
