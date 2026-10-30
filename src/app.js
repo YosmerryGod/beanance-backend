@@ -30,7 +30,7 @@ export async function buildApp(config) {
   fastify.decorate("walletService", createWalletService(database, walletEncryptionKey));
   fastify.decorate("exchangeService", createExchangeService(database, exchangeEncryptionKey));
   // Public Binance Futures market data runs independently of user exchange credentials.
-  const marketService = createMarketService(fastify.log);
+  const marketService = createMarketService(fastify.log, database);
   fastify.decorate("marketService", marketService);
   fastify.addHook("onReady", async () => marketService.start());
   fastify.addHook("onClose", async () => marketService.close());
