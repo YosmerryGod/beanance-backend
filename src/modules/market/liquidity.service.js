@@ -39,7 +39,8 @@ export function createLiquidityService(logger) {
       symbol,
       aggSocket: null,
       depthSocket: null,
-      reconnectTimer: null,
+      aggReconnectTimer: null,
+      depthReconnectTimer: null,
       snapshotTimer: null,
       snapshotBusy: false,
       depthReady: false,
@@ -59,6 +60,10 @@ export function createLiquidityService(logger) {
     sessions.set(symbol, session);
     connectAggTrades(session);
     connectDepth(session);
+    session.snapshotTimer = setInterval(() => {
+      if (session.depthReady) captureHeatmap(session);
+    }, SNAPSHOT_INTERVAL_MS);
+    session.snapshotTimer.unref?.();
     return session;
   }
 
@@ -71,13 +76,14 @@ export function createLiquidityService(logger) {
   }
 
   function scheduleReconnect(session, kind) {
-    if (stopped || session.reconnectTimer) return;
-    session.reconnectTimer = setTimeout(() => {
-      session.reconnectTimer = null;
+    const timerKey = kind === "agg" ? "aggReconnectTimer" : "depthReconnectTimer";
+    if (stopped || session[timerKey]) return;
+    session[timerKey] = setTimeout(() => {
+      session[timerKey] = null;
       if (kind === "agg") connectAggTrades(session);
       else connectDepth(session);
     }, 3000);
-    session.reconnectTimer.unref?.();
+    session[timerKey].unref?.();
   }
 
   function connectAggTrades(session) {
@@ -323,7 +329,9 @@ export function createLiquidityService(logger) {
   function close() {
     stopped = true;
     for (const session of sessions.values()) {
-      if (session.reconnectTimer) clearTimeout(session.reconnectTimer);
+      if (session.aggReconnectTimer) clearTimeout(session.aggReconnectTimer);
+      if (session.depthReconnectTimer) clearTimeout(session.depthReconnectTimer);
+      if (session.snapshotTimer) clearInterval(session.snapshotTimer);
       session.aggSocket?.removeAllListeners();
       session.depthSocket?.removeAllListeners();
       session.aggSocket?.close();
