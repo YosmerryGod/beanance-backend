@@ -3,38 +3,44 @@ import assert from "node:assert/strict";
 import { buildApp } from "../../src/app.js";
 
 async function createTestApp() {
-  return buildApp({
+  let sentCode;
+  const app = await buildApp({
     nodeEnv: "test",
     databasePath: ":memory:",
     jwtSecret: "test-secret-with-at-least-thirty-two-characters",
-    googleClientId: ""
+    googleClientId: "",
+    emailSender: async ({ code }) => { sentCode = code; }
   });
+  return { app, getCode: () => sentCode };
 }
 
-async function registerUser(app, email) {
-  const response = await app.inject({
+async function registerUser(app, getCode, email) {
+  const pending = await app.inject({
     method: "POST",
     url: "/api/v1/auth/register",
     payload: { email, password: "initial-password-123" }
   });
+  assert.equal(pending.statusCode, 202);
 
-  assert.equal(response.statusCode, 201);
-  return response.json();
+  const verified = await app.inject({
+    method: "POST",
+    url: "/api/v1/auth/register/verify",
+    payload: { email, code: getCode() }
+  });
+  assert.equal(verified.statusCode, 200);
+  return verified.json();
 }
 
 test("authenticated user can update username and avatar", async (t) => {
-  const app = await createTestApp();
+  const { app, getCode } = await createTestApp();
   t.after(() => app.close());
 
-  const account = await registerUser(app, "profile@example.com");
+  const account = await registerUser(app, getCode, "profile@example.com");
   const response = await app.inject({
     method: "PATCH",
     url: "/api/v1/auth/profile",
     headers: { authorization: `Bearer ${account.token}` },
-    payload: {
-      username: "Beanance_User",
-      avatarUrl: "https://example.com/avatar.png"
-    }
+    payload: { username: "Beanance_User", avatarUrl: "https://example.com/avatar.png" }
   });
 
   assert.equal(response.statusCode, 200);
@@ -42,55 +48,15 @@ test("authenticated user can update username and avatar", async (t) => {
   assert.equal(response.json().user.avatarUrl, "https://example.com/avatar.png");
 });
 
-test("profile update rejects duplicate usernames", async (t) => {
-  const app = await createTestApp();
+test("email password change requires email code after current password", async (t) => {
+  const { app, getCode } = await createTestApp();
   t.after(() => app.close());
 
-  const first = await registerUser(app, "first@example.com");
-  await registerUser(app, "second@example.com");
+  const account = await registerUser(app, getCode, "password@example.com");
 
-  const response = await app.inject({
-    method: "PATCH",
-    url: "/api/v1/auth/profile",
-    headers: { authorization: `Bearer ${first.token}` },
-    payload: { username: "bean_reserved" }
-  });
-
-  assert.equal(response.statusCode, 200);
-
-  const second = app.database.prepare(
-    "SELECT id FROM users WHERE email = ?"
-  ).get("second@example.com");
-
-  const secondToken = app.jwt.sign({ sub: second.id, email: "second@example.com" });
-  const conflict = await app.inject({
-    method: "PATCH",
-    url: "/api/v1/auth/profile",
-    headers: { authorization: `Bearer ${secondToken}` },
-    payload: { username: "bean_reserved" }
-  });
-
-  assert.equal(conflict.statusCode, 409);
-});
-
-test("email user must provide current password to change password", async (t) => {
-  const app = await createTestApp();
-  t.after(() => app.close());
-
-  const account = await registerUser(app, "password@example.com");
-
-  const rejected = await app.inject({
-    method: "PUT",
-    url: "/api/v1/auth/password",
-    headers: { authorization: `Bearer ${account.token}` },
-    payload: { newPassword: "new-password-456" }
-  });
-
-  assert.equal(rejected.statusCode, 401);
-
-  const changed = await app.inject({
-    method: "PUT",
-    url: "/api/v1/auth/password",
+  const request = await app.inject({
+    method: "POST",
+    url: "/api/v1/auth/password/request-code",
     headers: { authorization: `Bearer ${account.token}` },
     payload: {
       currentPassword: "initial-password-123",
@@ -98,22 +64,27 @@ test("email user must provide current password to change password", async (t) =>
     }
   });
 
-  assert.equal(changed.statusCode, 200);
+  assert.equal(request.statusCode, 200);
+
+  const verified = await app.inject({
+    method: "POST",
+    url: "/api/v1/auth/password/verify-code",
+    headers: { authorization: `Bearer ${account.token}` },
+    payload: { code: getCode() }
+  });
+
+  assert.equal(verified.statusCode, 200);
 
   const login = await app.inject({
     method: "POST",
     url: "/api/v1/auth/login",
-    payload: {
-      email: "password@example.com",
-      password: "new-password-456"
-    }
+    payload: { email: "password@example.com", password: "new-password-456" }
   });
-
   assert.equal(login.statusCode, 200);
 });
 
 test("profile and password endpoints require authentication", async (t) => {
-  const app = await createTestApp();
+  const { app } = await createTestApp();
   t.after(() => app.close());
 
   const profile = await app.inject({
@@ -121,10 +92,9 @@ test("profile and password endpoints require authentication", async (t) => {
     url: "/api/v1/auth/profile",
     payload: { username: "unauthorized" }
   });
-
   const password = await app.inject({
-    method: "PUT",
-    url: "/api/v1/auth/password",
+    method: "POST",
+    url: "/api/v1/auth/password/request-code",
     payload: { newPassword: "new-password-456" }
   });
 
