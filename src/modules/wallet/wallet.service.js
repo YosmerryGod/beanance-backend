@@ -96,7 +96,11 @@ export function createWalletService(database, encryptionKeyHex) {
         normalizedMnemonic = mnemonic.trim().replace(/\\s+/g, " ");
         wallet = Wallet.fromPhrase(normalizedMnemonic);
       } else {
-        wallet = new Wallet(privateKey.trim());
+        const normalizedPrivateKey = privateKey.trim();
+        const keyWithPrefix = normalizedPrivateKey.startsWith("0x")
+          ? normalizedPrivateKey
+          : `0x${normalizedPrivateKey}`;
+        wallet = new Wallet(keyWithPrefix);
       }
     } catch {
       const error = new Error("Invalid private key or mnemonic phrase.");
