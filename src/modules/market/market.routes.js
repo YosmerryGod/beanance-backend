@@ -110,7 +110,15 @@ export async function marketRoutes(fastify) {
           macdSlow: { type: "integer", minimum: 3, maximum: 200, default: 26 },
           macdSignal: { type: "integer", minimum: 2, maximum: 100, default: 9 },
           bollingerPeriod: { type: "integer", minimum: 2, maximum: 200, default: 20 },
-          atrPeriod: { type: "integer", minimum: 2, maximum: 200, default: 14 }
+          atrPeriod: { type: "integer", minimum: 2, maximum: 200, default: 14 },
+          adxPeriod: { type: "integer", minimum: 2, maximum: 200, default: 14 },
+          stochasticPeriod: { type: "integer", minimum: 2, maximum: 200, default: 14 },
+          stochasticSignal: { type: "integer", minimum: 2, maximum: 200, default: 3 },
+          cciPeriod: { type: "integer", minimum: 2, maximum: 200, default: 20 },
+          mfiPeriod: { type: "integer", minimum: 2, maximum: 200, default: 14 },
+          rocPeriod: { type: "integer", minimum: 2, maximum: 200, default: 12 },
+          williamsRPeriod: { type: "integer", minimum: 2, maximum: 200, default: 14 },
+          supertrendMultiplier: { type: "number", minimum: 0.5, maximum: 10, default: 3 }
         }
       }
     }
@@ -147,6 +155,31 @@ export async function marketRoutes(fastify) {
       ...result
     };
   });
+
+  // Public derivatives analytics: funding, mark price, OI, ratios and depth snapshot.
+  fastify.get("/markets/:symbol/futures-analytics", {
+    schema: {
+      params: {
+        type: "object",
+        required: ["symbol"],
+        properties: {
+          symbol: { type: "string", minLength: 3, maxLength: 30, pattern: "^[A-Za-z0-9_]+$" }
+        }
+      },
+      querystring: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          period: { type: "string", enum: ["5m", "15m", "30m", "1h", "2h", "4h", "6h", "12h", "1d"], default: "5m" },
+          limit: { type: "integer", minimum: 1, maximum: 500, default: 30 }
+        }
+      }
+    }
+  }, async (request) => market.getFuturesAnalytics(
+    request.params.symbol,
+    request.query.period,
+    request.query.limit
+  ));
 
   // Public diagnostics for the upstream market data connection.
   fastify.get("/status", async () => market.getStatus());
