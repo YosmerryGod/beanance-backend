@@ -1,7 +1,9 @@
-import { randomUUID, randomBytes } from "node:crypto";
+import { randomUUID, randomBytes, randomInt, createHmac } from "node:crypto";
 import bcrypt from "bcryptjs";
 
 const USERNAME_ALPHABET = "abcdefghjkmnpqrstuvwxyz23456789";
+const CODE_TTL_MINUTES = 10;
+const MAX_CODE_ATTEMPTS = 5;
 
 function randomUsername() {
   const bytes = randomBytes(8);
@@ -12,6 +14,10 @@ function randomUsername() {
   }
 
   return `bean_${suffix}`;
+}
+
+function hashCode(code, secret) {
+  return createHmac("sha256", secret).update(code).digest("hex");
 }
 
 function publicUser(user) {
@@ -25,7 +31,13 @@ function publicUser(user) {
   };
 }
 
-export function createAuthService(database, googleClient, googleClientId) {
+export function createAuthService(
+  database,
+  googleClient,
+  googleClientId,
+  sendVerificationEmail,
+  verificationSecret
+) {
   const findByEmail = database.prepare(
     "SELECT * FROM users WHERE email = ? COLLATE NOCASE"
   );
@@ -58,7 +70,88 @@ export function createAuthService(database, googleClient, googleClientId) {
     );
   }
 
-  async function register(fastify, { email, password }) {
+  function requireEmailDelivery() {
+    if (!sendVerificationEmail) {
+      const error = new Error("Email delivery is not configured.");
+      error.statusCode = 503;
+      throw error;
+    }
+  }
+
+  async function createVerification({ email, purpose, userId = null, passwordHash = null }) {
+    requireEmailDelivery();
+
+    const code = String(randomInt(100000, 1000000));
+    const id = randomUUID();
+    const expiresAt = new Date(Date.now() + CODE_TTL_MINUTES * 60 * 1000).toISOString();
+
+    database.prepare(`
+      DELETE FROM email_verification_codes
+      WHERE email = ? COLLATE NOCASE AND purpose = ?
+    `).run(email, purpose);
+
+    database.prepare(`
+      INSERT INTO email_verification_codes (
+        id, user_id, email, purpose, password_hash, code_hash, expires_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run(id, userId, email, purpose, passwordHash, hashCode(code, verificationSecret), expiresAt);
+
+    try {
+      await sendVerificationEmail({ to: email, code, purpose });
+    } catch (error) {
+      database.prepare("DELETE FROM email_verification_codes WHERE id = ?").run(id);
+      throw error;
+    }
+  }
+
+  function consumeVerification({ email, purpose, code, userId = null }) {
+    const record = userId
+      ? database.prepare(`
+          SELECT * FROM email_verification_codes
+          WHERE user_id = ? AND purpose = ?
+          ORDER BY created_at DESC LIMIT 1
+        `).get(userId, purpose)
+      : database.prepare(`
+          SELECT * FROM email_verification_codes
+          WHERE email = ? COLLATE NOCASE AND purpose = ?
+          ORDER BY created_at DESC LIMIT 1
+        `).get(email, purpose);
+
+    if (!record) {
+      const error = new Error("Verification code is invalid or expired.");
+      error.statusCode = 400;
+      throw error;
+    }
+
+    if (new Date(record.expires_at).getTime() <= Date.now()) {
+      database.prepare("DELETE FROM email_verification_codes WHERE id = ?").run(record.id);
+      const error = new Error("Verification code has expired.");
+      error.statusCode = 400;
+      throw error;
+    }
+
+    if (record.attempts >= MAX_CODE_ATTEMPTS) {
+      database.prepare("DELETE FROM email_verification_codes WHERE id = ?").run(record.id);
+      const error = new Error("Too many incorrect verification attempts.");
+      error.statusCode = 429;
+      throw error;
+    }
+
+    const submittedHash = hashCode(code, verificationSecret);
+    if (submittedHash !== record.code_hash) {
+      database.prepare(
+        "UPDATE email_verification_codes SET attempts = attempts + 1 WHERE id = ?"
+      ).run(record.id);
+      const error = new Error("Verification code is incorrect.");
+      error.statusCode = 400;
+      throw error;
+    }
+
+    database.prepare("DELETE FROM email_verification_codes WHERE id = ?").run(record.id);
+    return record;
+  }
+
+  async function register({ email, password }) {
     const normalizedEmail = email.trim().toLowerCase();
 
     if (findByEmail.get(normalizedEmail)) {
@@ -68,12 +161,40 @@ export function createAuthService(database, googleClient, googleClientId) {
     }
 
     const passwordHash = await bcrypt.hash(password, 12);
+    await createVerification({
+      email: normalizedEmail,
+      purpose: "register",
+      passwordHash
+    });
+
+    return {
+      message: "Verification code sent. Check your email to complete registration.",
+      email: normalizedEmail,
+      expiresInSeconds: CODE_TTL_MINUTES * 60
+    };
+  }
+
+  async function verifyRegistration(fastify, { email, code }) {
+    const normalizedEmail = email.trim().toLowerCase();
+
+    if (findByEmail.get(normalizedEmail)) {
+      const error = new Error("An account with this email already exists.");
+      error.statusCode = 409;
+      throw error;
+    }
+
+    const verification = consumeVerification({
+      email: normalizedEmail,
+      purpose: "register",
+      code
+    });
+
     const user = {
       id: randomUUID(),
       username: createUniqueUsername(),
       email: normalizedEmail,
       avatar_url: null,
-      password_hash: passwordHash,
+      password_hash: verification.password_hash,
       google_id: null,
       auth_provider: "email"
     };
@@ -88,7 +209,8 @@ export function createAuthService(database, googleClient, googleClientId) {
       user.auth_provider
     );
 
-    return { user: publicUser(user), token: issueToken(fastify, user) };
+    const savedUser = database.prepare("SELECT * FROM users WHERE id = ?").get(user.id);
+    return { user: publicUser(savedUser), token: issueToken(fastify, savedUser) };
   }
 
   async function login(fastify, { email, password }) {
@@ -162,6 +284,7 @@ export function createAuthService(database, googleClient, googleClientId) {
         user.google_id,
         user.auth_provider
       );
+      user = database.prepare("SELECT * FROM users WHERE id = ?").get(user.id);
     } else if (payload.picture && payload.picture !== user.avatar_url) {
       database.prepare(
         "UPDATE users SET avatar_url = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?"
@@ -230,10 +353,10 @@ export function createAuthService(database, googleClient, googleClientId) {
       throw error;
     }
 
-    return publicUser(getUserOrThrow(userId));
+    return getProfile(userId);
   }
 
-  async function changePassword(userId, { currentPassword, newPassword }) {
+  async function requestPasswordChange(userId, { currentPassword, newPassword }) {
     const user = getUserOrThrow(userId);
 
     if (user.password_hash) {
@@ -245,26 +368,57 @@ export function createAuthService(database, googleClient, googleClientId) {
     }
 
     const passwordHash = await bcrypt.hash(newPassword, 12);
-    const authProvider = user.google_id ? "both" : "email";
+    await createVerification({
+      email: user.email,
+      userId,
+      purpose: "change_password",
+      passwordHash
+    });
 
+    return {
+      message: "Verification code sent to your account email.",
+      email: user.email,
+      expiresInSeconds: CODE_TTL_MINUTES * 60
+    };
+  }
+
+  function verifyPasswordChange(userId, { code }) {
+    const user = getUserOrThrow(userId);
+    const verification = consumeVerification({
+      userId,
+      purpose: "change_password",
+      code
+    });
+
+    if (verification.email.toLowerCase() !== user.email.toLowerCase()) {
+      const error = new Error("Verification request is no longer valid.");
+      error.statusCode = 400;
+      throw error;
+    }
+
+    const authProvider = user.google_id ? "both" : "email";
     database.prepare(`
       UPDATE users
       SET password_hash = ?, auth_provider = ?, updated_at = CURRENT_TIMESTAMP
       WHERE id = ?
-    `).run(passwordHash, authProvider, userId);
+    `).run(verification.password_hash, authProvider, userId);
 
     return {
-      message: user.password_hash ? "Password updated successfully." : "Password created successfully.",
+      message: user.password_hash
+        ? "Password updated successfully."
+        : "Password created successfully.",
       user: getProfile(userId)
     };
   }
 
   return {
     register,
+    verifyRegistration,
     login,
     loginWithGoogle,
     getProfile,
     updateProfile,
-    changePassword
+    requestPasswordChange,
+    verifyPasswordChange
   };
 }
