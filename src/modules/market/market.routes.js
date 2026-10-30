@@ -234,6 +234,43 @@ export async function marketRoutes(fastify) {
     }
   }, async (request) => market.getLiquidityHeatmap(request.params.symbol, request.query.limit));
 
+  // Historical CVD candles aggregated from persisted aggTrade records.
+  fastify.get("/markets/:symbol/cvd/history", {
+    schema: {
+      params: {
+        type: "object",
+        required: ["symbol"],
+        properties: { symbol: { type: "string", minLength: 3, maxLength: 30, pattern: "^[A-Za-z0-9_]+$" } }
+      },
+      querystring: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          range: { type: "string", enum: ["1h", "4h", "24h", "7d"], default: "24h" },
+          interval: { type: "string", enum: ["1m", "5m", "15m", "1h"], default: "1m" }
+        }
+      }
+    }
+  }, async (request) => market.getCvdHistory(request.params.symbol, request.query.range, request.query.interval));
+
+  // Historical depth snapshots sampled from SQLite for heatmap rendering.
+  fastify.get("/markets/:symbol/liquidity-heatmap/history", {
+    schema: {
+      params: {
+        type: "object",
+        required: ["symbol"],
+        properties: { symbol: { type: "string", minLength: 3, maxLength: 30, pattern: "^[A-Za-z0-9_]+$" } }
+      },
+      querystring: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          range: { type: "string", enum: ["1h", "4h", "24h", "7d"], default: "24h" },
+          limit: { type: "integer", minimum: 1, maximum: 1000, default: 500 }
+        }
+      }
+    }
+  }, async (request) => market.getLiquidityHeatmapHistory(request.params.symbol, request.query.range, request.query.limit));
   // Diagnostics for per-symbol aggTrade and diff-depth streams.
   fastify.get("/liquidity-status", async () => market.getLiquidityStatus());
 
