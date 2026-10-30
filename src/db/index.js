@@ -1,9 +1,10 @@
 import Database from "better-sqlite3";
 import { dirname, resolve } from "node:path";
 import { mkdirSync } from "node:fs";
+import { runMigrations } from "./migrate.js";
 
 export function createDatabase(databasePath) {
-  const resolvedPath = resolve(databasePath);
+  const resolvedPath = databasePath === ":memory:" ? databasePath : resolve(databasePath);
 
   if (resolvedPath !== ":memory:") {
     mkdirSync(dirname(resolvedPath), { recursive: true });
@@ -14,6 +15,8 @@ export function createDatabase(databasePath) {
   database.pragma("journal_mode = WAL");
   database.pragma("foreign_keys = ON");
   database.pragma("busy_timeout = 5000");
+
+  runMigrations(database);
 
   return database;
 }
