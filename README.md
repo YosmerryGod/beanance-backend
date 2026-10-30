@@ -54,7 +54,7 @@ beanance-backend/
 └── package.json
 ```
 
-The domain folders are reserved for future MVP modules. No authentication, strategy, token-gating, or copy-trading business logic is implemented in this scaffold.
+The authentication MVP now supports email/password registration and login, Google ID-token sign-in, JWT sessions, and a protected current-user endpoint. Strategy, token-gating, and copy-trading business logic are not implemented yet.
 
 ## Getting Started
 
@@ -135,7 +135,7 @@ The connection enables:
 - Foreign-key enforcement.
 - A configurable busy timeout.
 
-Database schema and migrations will be introduced with the first data-backed feature. Do not store production database files in the repository.
+Database migrations are applied automatically at startup and tracked in `schema_migrations`. The initial migration creates the `users` table. Do not store production database files in the repository.
 
 ## Product Direction
 
@@ -165,7 +165,9 @@ Owning a strategy token does not automatically imply ownership of the strategy, 
 - [x] Add versioned health endpoint
 - [x] Add initial automated tests
 - [ ] Add database migrations
-- [ ] Implement authentication and user accounts
+- [x] Implement email/password registration and login
+- [x] Add Google ID-token sign-in
+- [x] Add JWT authentication and current-user endpoint
 - [ ] Implement strategy creation and deployment
 - [ ] Add creator-defined minimum token requirements
 - [ ] Integrate on-chain token balance verification
