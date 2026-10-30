@@ -172,7 +172,7 @@ export function createAuthService(database, googleClient, googleClientId) {
     return { user: publicUser(user), token: issueToken(fastify, user) };
   }
 
-  function getProfile(userId) {
+  function getUserOrThrow(userId) {
     const user = database.prepare(
       "SELECT * FROM users WHERE id = ?"
     ).get(userId);
@@ -183,8 +183,88 @@ export function createAuthService(database, googleClient, googleClientId) {
       throw error;
     }
 
-    return publicUser(user);
+    return user;
   }
 
-  return { register, login, loginWithGoogle, getProfile };
+  function getProfile(userId) {
+    return publicUser(getUserOrThrow(userId));
+  }
+
+  function updateProfile(userId, { username, avatarUrl }) {
+    const user = getUserOrThrow(userId);
+
+    if (username !== undefined) {
+      const normalizedUsername = username.trim();
+
+      if (normalizedUsername.toLowerCase() !== user.username.toLowerCase()) {
+        const existing = database.prepare(
+          "SELECT id FROM users WHERE username = ? COLLATE NOCASE AND id != ?"
+        ).get(normalizedUsername, userId);
+
+        if (existing) {
+          const error = new Error("This username is already taken.");
+          error.statusCode = 409;
+          throw error;
+        }
+      }
+
+      user.username = normalizedUsername;
+    }
+
+    if (avatarUrl !== undefined) {
+      user.avatar_url = avatarUrl;
+    }
+
+    try {
+      database.prepare(`
+        UPDATE users
+        SET username = ?, avatar_url = ?, updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+      `).run(user.username, user.avatar_url, userId);
+    } catch (error) {
+      if (error.code === "SQLITE_CONSTRAINT_UNIQUE") {
+        const conflict = new Error("This username is already taken.");
+        conflict.statusCode = 409;
+        throw conflict;
+      }
+      throw error;
+    }
+
+    return publicUser(getUserOrThrow(userId));
+  }
+
+  async function changePassword(userId, { currentPassword, newPassword }) {
+    const user = getUserOrThrow(userId);
+
+    if (user.password_hash) {
+      if (!currentPassword || !(await bcrypt.compare(currentPassword, user.password_hash))) {
+        const error = new Error("Current password is incorrect.");
+        error.statusCode = 401;
+        throw error;
+      }
+    }
+
+    const passwordHash = await bcrypt.hash(newPassword, 12);
+    const authProvider = user.google_id ? "both" : "email";
+
+    database.prepare(`
+      UPDATE users
+      SET password_hash = ?, auth_provider = ?, updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+    `).run(passwordHash, authProvider, userId);
+
+    return {
+      message: user.password_hash ? "Password updated successfully." : "Password created successfully.",
+      user: getProfile(userId)
+    };
+  }
+
+  return {
+    register,
+    login,
+    loginWithGoogle,
+    getProfile,
+    updateProfile,
+    changePassword
+  };
 }
