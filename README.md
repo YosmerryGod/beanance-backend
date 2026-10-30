@@ -54,7 +54,7 @@ beanance-backend/
 └── package.json
 ```
 
-The MVP supports email/password registration and login, Google ID-token sign-in, JWT sessions, protected profile management, and custodial BNB Smart Chain wallets. Strategy, token-gating, and copy-trading business logic are not implemented yet.
+The MVP supports email/password registration and login, Google ID-token sign-in, JWT sessions, protected profile management, custodial BNB Smart Chain wallets, and Binance USDⓈ-M Futures account connections. Strategy and copy-trading execution logic are not implemented yet.
 
 ## Getting Started
 
@@ -86,7 +86,7 @@ Available variables:
 | NODE_ENV | development | Runtime environment |
 | HOST | 0.0.0.0 | Server bind address |
 | PORT | 3000 | HTTP port |
-| DATABASE_PATH | ./storage/beanance.sqlite | SQLite database file path |\n| WALLET_ENCRYPTION_KEY | Required in production | 32-byte AES-256-GCM key encoded as 64 hexadecimal characters |
+| DATABASE_PATH | ./storage/beanance.sqlite | SQLite database file path |\n| WALLET_ENCRYPTION_KEY | Required in production | 32-byte AES-256-GCM key for wallet secrets |\n| EXCHANGE_ENCRYPTION_KEY | Required in production | Separate 32-byte AES-256-GCM key for exchange API credentials |
 
 The storage directory is created automatically when the database is initialized. SQLite database files are excluded from Git.
 
@@ -238,3 +238,34 @@ The wallet API uses ethers v6 and BNB Smart Chain mainnet (chain ID 56). Private
 The create endpoint returns the newly generated recovery phrase once so the user can back it up. Import endpoints never return the submitted private key or mnemonic. Standard wallet listing and detail endpoints return public metadata only. A dedicated, re-authenticated secret-export flow should be implemented before offering users the ability to reveal stored secrets later.
 
 **Custodial security note:** Beanance controls the server-side encryption key and can technically access user wallet keys. Protect the server, database backups, environment secrets, and deployment access accordingly. Do not log request bodies for wallet import or wallet creation responses.
+
+
+## Binance USDⓈ-M Futures Connection API
+
+All exchange endpoints require a valid JWT. A user can connect one or more Binance Futures API credentials to their Beanance account.
+
+| Method | Endpoint | Purpose |
+| --- | --- | --- |
+| POST | `/api/v1/exchanges/binance/connect` | Verify and connect Binance USDⓈ-M Futures |
+| GET | `/api/v1/exchanges` | List connected exchange accounts |
+| GET | `/api/v1/exchanges/:accountId` | Read connection metadata |
+| POST | `/api/v1/exchanges/:accountId/verify` | Re-verify saved credentials |
+| DELETE | `/api/v1/exchanges/:accountId` | Disconnect and delete saved credentials |
+
+Connect request body:
+
+```json
+{
+  "apiKey": "YOUR_BINANCE_API_KEY",
+  "apiSecret": "YOUR_BINANCE_API_SECRET",
+  "label": "Main Futures"
+}
+```
+
+The backend signs a read-only account request to Binance `GET /fapi/v3/account` using HMAC-SHA256 and a short `recvWindow`. Credentials are encrypted with AES-256-GCM before storage. API keys and secrets are never returned by the API.
+
+Generate a separate encryption key using `openssl rand -hex 32` and set it as `EXCHANGE_ENCRYPTION_KEY`. Do not reuse `WALLET_ENCRYPTION_KEY` or `JWT_SECRET`. Back up this key securely; losing it makes stored exchange credentials unrecoverable.
+
+For the initial connection, create a Binance API key with Futures account read access. Do not enable withdrawals or transfers. The connection check proves that Beanance can read the USDⓈ-M Futures account; it does not prove that order/trading permission is enabled. Trading permission checks and copy-trading order execution will be implemented separately. Use IP restrictions on the Binance API key where possible.
+
+The current integration uses Binance production Futures REST API only. It does not place orders, change leverage, or modify positions.
