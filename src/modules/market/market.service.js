@@ -37,10 +37,10 @@ function normalizeTicker(ticker) {
   };
 }
 
-export function createMarketService(logger) {
+export function createMarketService(logger, database) {
   const markets = new Map();
   const activeSymbols = new Set();
-  const liquidityService = createLiquidityService(logger);
+  const liquidityService = createLiquidityService(logger, database);
 
   let socket = null;
   let reconnectTimer = null;
