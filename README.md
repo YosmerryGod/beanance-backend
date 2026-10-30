@@ -192,6 +192,20 @@ Email registration accepts an email and a password of at least 8 characters. The
 
 Successful authentication returns a JWT that expires after 7 days. Protected requests must include `Authorization: Bearer <jwt>`. Set a strong random `JWT_SECRET` with at least 32 characters before deployment. Google sign-in remains disabled until `GOOGLE_CLIENT_ID` is configured.
 
+## Profile Management API
+
+All profile-management endpoints require a valid JWT in the `Authorization: Bearer <jwt>` header.
+
+| Method | Endpoint | Purpose |
+| --- | --- | --- |
+| GET | `/api/v1/auth/me` | Read the current profile |
+| PATCH | `/api/v1/auth/profile` | Update username and/or avatar URL |
+| PUT | `/api/v1/auth/password` | Create or change account password |
+
+Profile updates accept `username` (3–20 letters, numbers, or underscores) and `avatarUrl` (an absolute URL or `null` to clear the photo). Usernames must be unique.
+
+Password updates accept `newPassword` (at least 8 characters). Email/password accounts must also provide `currentPassword`. Google-only accounts can create a password without a current password; after doing so, the account is marked as supporting both Google and password sign-in. Passwords are stored as bcrypt hashes.
+
 ## Risk Disclaimer
 
 Trading digital assets involves substantial risk and can result in the loss of capital. Backtested or historical strategy performance does not guarantee future results. Strategy tokens are separate digital assets and should not be represented as guarantees of profit.
