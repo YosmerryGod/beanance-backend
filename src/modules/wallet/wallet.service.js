@@ -1,5 +1,6 @@
 import {
   createCipheriv,
+  createDecipheriv,
   randomBytes,
   randomUUID
 } from "node:crypto";
@@ -20,6 +21,26 @@ function encryptSecret(value, encryptionKey) {
     tag.toString("hex"),
     encrypted.toString("hex")
   ].join(":");
+}
+
+function decryptSecret(payload, encryptionKey) {
+  const [version, ivHex, tagHex, encryptedHex] = payload.split(":");
+
+  if (version !== "v1" || !ivHex || !tagHex || !encryptedHex) {
+    throw new Error("Unsupported or corrupted wallet secret.");
+  }
+
+  const decipher = createDecipheriv(
+    "aes-256-gcm",
+    encryptionKey,
+    Buffer.from(ivHex, "hex")
+  );
+  decipher.setAuthTag(Buffer.from(tagHex, "hex"));
+
+  return Buffer.concat([
+    decipher.update(Buffer.from(encryptedHex, "hex")),
+    decipher.final()
+  ]).toString("utf8");
 }
 
 function publicWallet(wallet) {
@@ -157,6 +178,24 @@ export function createWalletService(database, encryptionKeyHex) {
     return get(userId, walletId);
   }
 
+  function getSigner(userId, walletId, provider = null) {
+    const walletRecord = findWallet.get(walletId, userId);
+
+    if (!walletRecord) {
+      const error = new Error("Wallet not found.");
+      error.statusCode = 404;
+      throw error;
+    }
+
+    const privateKey = decryptSecret(
+      walletRecord.encrypted_private_key,
+      encryptionKey
+    );
+    const signer = new Wallet(privateKey);
+
+    return provider ? signer.connect(provider) : signer;
+  }
+
   function remove(userId, walletId) {
     const wallet = findWallet.get(walletId, userId);
 
@@ -197,6 +236,7 @@ export function createWalletService(database, encryptionKeyHex) {
     import: importWallet,
     list,
     get,
+    getSigner,
     setPrimary,
     remove
   };
