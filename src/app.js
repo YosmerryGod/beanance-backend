@@ -23,8 +23,11 @@ export async function buildApp(config) {
   const emailSender = config.emailSender || createEmailSender(config);
 
   fastify.decorate("database", database);
-  fastify.decorate("walletService", createWalletService(database, config.walletEncryptionKey));
-  fastify.decorate("exchangeService", createExchangeService(database, config.exchangeEncryptionKey));
+  // Test configurations may omit encryption keys; production loadConfig requires both keys.
+  const walletEncryptionKey = config.walletEncryptionKey || (config.nodeEnv === "production" ? "" : "11".repeat(32));
+  const exchangeEncryptionKey = config.exchangeEncryptionKey || (config.nodeEnv === "production" ? "" : "22".repeat(32));
+  fastify.decorate("walletService", createWalletService(database, walletEncryptionKey));
+  fastify.decorate("exchangeService", createExchangeService(database, exchangeEncryptionKey));
   fastify.decorate(
     "authService",
     createAuthService(
