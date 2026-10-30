@@ -9,6 +9,7 @@ import { createAuthService } from "./modules/auth/auth.service.js";
 import { createEmailSender } from "./modules/auth/email.service.js";
 import { createWalletService } from "./modules/wallet/wallet.service.js";
 import { createExchangeService } from "./modules/exchanges/exchange.service.js";
+import { createMarketService } from "./modules/market/market.service.js";
 
 export async function buildApp(config) {
   const fastify = Fastify({
@@ -28,6 +29,11 @@ export async function buildApp(config) {
   const exchangeEncryptionKey = config.exchangeEncryptionKey || (config.nodeEnv === "production" ? "" : "22".repeat(32));
   fastify.decorate("walletService", createWalletService(database, walletEncryptionKey));
   fastify.decorate("exchangeService", createExchangeService(database, exchangeEncryptionKey));
+  // Public Binance Futures market data runs independently of user exchange credentials.
+  const marketService = createMarketService(fastify.log);
+  fastify.decorate("marketService", marketService);
+  fastify.addHook("onReady", async () => marketService.start());
+  fastify.addHook("onClose", async () => marketService.close());
   fastify.decorate(
     "authService",
     createAuthService(
