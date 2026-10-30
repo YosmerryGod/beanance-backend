@@ -175,6 +175,23 @@ Owning a strategy token does not automatically imply ownership of the strategy, 
 - [ ] Add copy-trading execution and user risk controls
 - [ ] Add strategy performance and risk analytics
 
+## Authentication API
+
+Base path: `/api/v1/auth`
+
+| Method | Endpoint | Purpose |
+| --- | --- | --- |
+| POST | `/register` | Create an email/password account |
+| POST | `/login` | Sign in with email/password |
+| POST | `/google` | Verify a Google ID token and sign in |
+| GET | `/me` | Return the authenticated user's profile |
+
+For Google sign-in, configure `GOOGLE_CLIENT_ID`. The frontend obtains an ID token using Google Identity Services and sends it to `POST /api/v1/auth/google` as `{ "idToken": "..." }`. The backend verifies the token, its audience, and the Google account's verified email.
+
+Email registration accepts an email and a password of at least 8 characters. The backend generates a random username and stores the password as a bcrypt hash. Password hashes are never returned by the API.
+
+Successful authentication returns a JWT that expires after 7 days. Protected requests must include `Authorization: Bearer <jwt>`. Set a strong random `JWT_SECRET` with at least 32 characters before deployment. Google sign-in remains disabled until `GOOGLE_CLIENT_ID` is configured.
+
 ## Risk Disclaimer
 
 Trading digital assets involves substantial risk and can result in the loss of capital. Backtested or historical strategy performance does not guarantee future results. Strategy tokens are separate digital assets and should not be represented as guarantees of profit.
