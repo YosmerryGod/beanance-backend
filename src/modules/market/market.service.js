@@ -283,6 +283,69 @@ export function createMarketService(logger) {
     };
   }
 
+  async function getFuturesAnalytics(symbol, period = "5m", limit = 30) {
+    const normalizedSymbol = symbol.toUpperCase();
+    if (!activeSymbols.has(normalizedSymbol)) {
+      throw createServiceError("Futures market symbol not found.", 404);
+    }
+
+    const allowedPeriods = new Set(["5m", "15m", "30m", "1h", "2h", "4h", "6h", "12h", "1d"]);
+    if (!allowedPeriods.has(period)) {
+      throw createServiceError("Unsupported analytics period.", 400);
+    }
+
+    const safeLimit = Math.min(Math.max(Number(limit) || 30, 1), 500);
+    const params = { symbol: normalizedSymbol, period, limit: String(safeLimit) };
+
+    const [premium, openInterest, openInterestHistory, globalLongShort, takerRatio, depth] =
+      await Promise.all([
+        binanceGet("/fapi/v1/premiumIndex", { symbol: normalizedSymbol }),
+        binanceGet("/fapi/v1/openInterest", { symbol: normalizedSymbol }),
+        binanceGet("/futures/data/openInterestHist", params),
+        binanceGet("/futures/data/globalLongShortAccountRatio", params),
+        binanceGet("/futures/data/takerlongshortRatio", params),
+        binanceGet("/fapi/v1/depth", { symbol: normalizedSymbol, limit: "100" })
+      ]);
+
+    const currentTicker = markets.get(normalizedSymbol) || null;
+    const bids = (depth.bids || []).map(([price, quantity]) => ({
+      price: Number(price), quantity: Number(quantity), notional: Number(price) * Number(quantity)
+    }));
+    const asks = (depth.asks || []).map(([price, quantity]) => ({
+      price: Number(price), quantity: Number(quantity), notional: Number(price) * Number(quantity)
+    }));
+
+    const bidNotional = bids.reduce((sum, item) => sum + item.notional, 0);
+    const askNotional = asks.reduce((sum, item) => sum + item.notional, 0);
+
+    return {
+      symbol: normalizedSymbol,
+      period,
+      ticker: currentTicker,
+      markPrice: premium.markPrice,
+      indexPrice: premium.indexPrice,
+      estimatedSettlePrice: premium.estimatedSettlePrice,
+      lastFundingRate: premium.lastFundingRate,
+      nextFundingTime: premium.nextFundingTime,
+      openInterest: {
+        quantity: openInterest.openInterest,
+        timestamp: openInterest.time
+      },
+      openInterestHistory,
+      globalLongShortAccountRatio: globalLongShort,
+      takerBuySellRatio: takerRatio,
+      orderBook: {
+        lastUpdateId: depth.lastUpdateId,
+        bids,
+        asks,
+        bidNotional,
+        askNotional,
+        bidAskNotionalRatio: askNotional === 0 ? null : bidNotional / askNotional,
+        note: "REST depth snapshot; not a synchronized diff-depth order book"
+      }
+    };
+  }
+
   function getStatus() {
     return {
       exchange: "binance",
@@ -319,6 +382,7 @@ export function createMarketService(logger) {
     listMarkets,
     getMarket,
     getKlines,
+    getFuturesAnalytics,
     getStatus
   };
 }
