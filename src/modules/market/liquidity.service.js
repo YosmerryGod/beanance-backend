@@ -331,6 +331,80 @@ export function createLiquidityService(logger, database) {
     };
   }
 
+  const HISTORY_RANGES = { "1h": 60 * 60 * 1000, "4h": 4 * 60 * 60 * 1000, "24h": 24 * 60 * 60 * 1000, "7d": 7 * 24 * 60 * 60 * 1000 };
+  const HISTORY_INTERVALS = { "1m": 60 * 1000, "5m": 5 * 60 * 1000, "15m": 15 * 60 * 1000, "1h": 60 * 60 * 1000 };
+  const loadCvdBuckets = database.prepare("SELECT CAST(trade_time / ? AS INTEGER) * ? AS timestamp, SUM(CASE WHEN side = 'buy' THEN quote_volume ELSE 0 END) AS buyVolume, SUM(CASE WHEN side = 'sell' THEN quote_volume ELSE 0 END) AS sellVolume, SUM(CASE WHEN side = 'buy' THEN quote_volume ELSE -quote_volume END) AS delta, COUNT(*) AS tradeCount FROM market_agg_trades WHERE symbol = ? AND trade_time >= ? GROUP BY CAST(trade_time / ? AS INTEGER) ORDER BY timestamp ASC");
+  const countHeatmapRange = database.prepare("SELECT COUNT(*) AS total FROM market_liquidity_snapshots WHERE symbol = ? AND captured_at >= ?");
+  const loadHeatmapRange = database.prepare("WITH ranked AS (SELECT id, captured_at, last_update_id, bids_json, asks_json, ROW_NUMBER() OVER (ORDER BY captured_at ASC, id ASC) AS row_num, COUNT(*) OVER () AS total FROM market_liquidity_snapshots WHERE symbol = ? AND captured_at >= ?) SELECT captured_at AS timestamp, last_update_id AS lastUpdateId, bids_json, asks_json FROM ranked WHERE row_num % ? = 0 OR row_num = total ORDER BY timestamp ASC LIMIT ?");
+
+  function getCvdHistory(symbol, range = "24h", interval = "1m") {
+    const session = getSession(symbol);
+    const rangeMs = HISTORY_RANGES[range];
+    const intervalMs = HISTORY_INTERVALS[interval];
+    if (!rangeMs) throw serviceError("Unsupported CVD history range. Use 1h, 4h, 24h or 7d.", 400);
+    if (!intervalMs) throw serviceError("Unsupported CVD history interval. Use 1m, 5m, 15m or 1h.", 400);
+    const now = Date.now();
+    const from = now - rangeMs;
+    const buckets = loadCvdBuckets.all(intervalMs, intervalMs, session.symbol, from, intervalMs);
+    let cumulativeDelta = 0;
+    const candles = buckets.map((bucket) => {
+      const delta = Number(bucket.delta || 0);
+      cumulativeDelta += delta;
+      return {
+        timestamp: Number(bucket.timestamp),
+        buyQuoteVolume: Number(bucket.buyVolume || 0),
+        sellQuoteVolume: Number(bucket.sellVolume || 0),
+        delta,
+        cumulativeDelta,
+        tradeCount: Number(bucket.tradeCount || 0)
+      };
+    });
+    return {
+      symbol: session.symbol,
+      source: "sqlite_agg_trades",
+      range,
+      interval,
+      from,
+      to: now,
+      unit: "USDT",
+      totalCandles: candles.length,
+      totalBuyQuoteVolume: candles.reduce((sum, item) => sum + item.buyQuoteVolume, 0),
+      totalSellQuoteVolume: candles.reduce((sum, item) => sum + item.sellQuoteVolume, 0),
+      netDelta: candles.reduce((sum, item) => sum + item.delta, 0),
+      candles,
+      note: "Cumulative delta starts at the beginning of the selected range. History is limited by configured database retention."
+    };
+  }
+
+  function getLiquidityHeatmapHistory(symbol, range = "24h", limit = 500) {
+    const session = getSession(symbol);
+    const rangeMs = HISTORY_RANGES[range];
+    if (!rangeMs) throw serviceError("Unsupported heatmap history range. Use 1h, 4h, 24h or 7d.", 400);
+    const safeLimit = Math.min(Math.max(Number(limit) || 500, 1), 1000);
+    const now = Date.now();
+    const from = now - rangeMs;
+    const count = Number(countHeatmapRange.get(session.symbol, from)?.total || 0);
+    const stride = Math.max(1, Math.ceil(count / safeLimit));
+    const points = loadHeatmapRange.all(session.symbol, from, stride, safeLimit).map((point) => ({
+      timestamp: Number(point.timestamp),
+      lastUpdateId: Number(point.lastUpdateId),
+      bids: JSON.parse(point.bids_json),
+      asks: JSON.parse(point.asks_json)
+    }));
+    return {
+      symbol: session.symbol,
+      source: "sqlite_diff_depth_snapshots",
+      range,
+      from,
+      to: now,
+      unit: "base_asset_quantity",
+      totalStoredSnapshots: count,
+      returnedSnapshots: points.length,
+      samplingStride: stride,
+      points,
+      retention: "7 days"
+    };
+  }
   function getStatus() {
     return {
       trackedSymbols: sessions.size,
@@ -360,5 +434,5 @@ export function createLiquidityService(logger, database) {
     sessions.clear();
   }
 
-  return { getCvd, getOrderBook, getLiquidityHeatmap, getStatus, close };
+  return { getCvd, getOrderBook, getLiquidityHeatmap, getCvdHistory, getLiquidityHeatmapHistory, getStatus, close };
 }
