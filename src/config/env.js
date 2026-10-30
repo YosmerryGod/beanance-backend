@@ -19,7 +19,8 @@ export function loadConfig(environment = process.env) {
     smtpUser: environment.SMTP_USER || "",
     smtpPassword: environment.SMTP_PASSWORD || "",
     smtpFrom: environment.SMTP_FROM || "",
-    walletEncryptionKey: environment.WALLET_ENCRYPTION_KEY || (environment.NODE_ENV === "production" ? "" : "11".repeat(32))
+    walletEncryptionKey: environment.WALLET_ENCRYPTION_KEY || (environment.NODE_ENV === "production" ? "" : "11".repeat(32)),
+    exchangeEncryptionKey: environment.EXCHANGE_ENCRYPTION_KEY || (environment.NODE_ENV === "production" ? "" : "22".repeat(32))
   };
 
   if (!Number.isInteger(config.port) || config.port < 1 || config.port > 65535) {
@@ -42,7 +43,7 @@ export function loadConfig(environment = process.env) {
     throw new Error("WALLET_ENCRYPTION_KEY is required in production.");
   }
 
-  if (!Number.isInteger(config.smtpPort) || config.smtpPort < 1 || config.smtpPort > 65535) {
+  if (config.exchangeEncryptionKey && !/^[a-fA-F0-9]{64}$/.test(config.exchangeEncryptionKey)) {\n    throw new Error("EXCHANGE_ENCRYPTION_KEY must be exactly 64 hexadecimal characters (32 bytes).");\n  }\n\n  if (config.nodeEnv === "production" && !config.exchangeEncryptionKey) {\n    throw new Error("EXCHANGE_ENCRYPTION_KEY is required in production.");\n  }\n\n  if (!Number.isInteger(config.smtpPort) || config.smtpPort < 1 || config.smtpPort > 65535) {
     throw new Error("SMTP_PORT must be a valid TCP port.");
   }
 
