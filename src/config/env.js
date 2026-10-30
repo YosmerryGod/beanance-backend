@@ -18,7 +18,8 @@ export function loadConfig(environment = process.env) {
     smtpSecure: environment.SMTP_SECURE === "true",
     smtpUser: environment.SMTP_USER || "",
     smtpPassword: environment.SMTP_PASSWORD || "",
-    smtpFrom: environment.SMTP_FROM || ""
+    smtpFrom: environment.SMTP_FROM || "",
+    walletEncryptionKey: environment.WALLET_ENCRYPTION_KEY || (environment.NODE_ENV === "production" ? "" : "11".repeat(32))
   };
 
   if (!Number.isInteger(config.port) || config.port < 1 || config.port > 65535) {
@@ -31,6 +32,14 @@ export function loadConfig(environment = process.env) {
 
   if (config.jwtSecret.length < 32) {
     throw new Error("JWT_SECRET must contain at least 32 characters.");
+  }
+
+  if (config.walletEncryptionKey && !/^[a-fA-F0-9]{64}$/.test(config.walletEncryptionKey)) {
+    throw new Error("WALLET_ENCRYPTION_KEY must be exactly 64 hexadecimal characters (32 bytes).");
+  }
+
+  if (config.nodeEnv === "production" && !config.walletEncryptionKey) {
+    throw new Error("WALLET_ENCRYPTION_KEY is required in production.");
   }
 
   if (!Number.isInteger(config.smtpPort) || config.smtpPort < 1 || config.smtpPort > 65535) {
