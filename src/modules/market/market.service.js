@@ -389,6 +389,8 @@ export function createMarketService(logger, database) {
     getCvd: liquidityService.getCvd,
     getOrderBook: liquidityService.getOrderBook,
     getLiquidityHeatmap: liquidityService.getLiquidityHeatmap,
+    getCvdHistory: liquidityService.getCvdHistory,
+    getLiquidityHeatmapHistory: liquidityService.getLiquidityHeatmapHistory,
     getLiquidityStatus: liquidityService.getStatus,
     getStatus
   };
