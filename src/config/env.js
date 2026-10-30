@@ -12,7 +12,13 @@ export function loadConfig(environment = process.env) {
     port: Number(environment.PORT || defaults.PORT),
     databasePath: environment.DATABASE_PATH || defaults.DATABASE_PATH,
     jwtSecret: environment.JWT_SECRET || (environment.NODE_ENV === "production" ? "" : "local-development-secret-change-before-deploy"),
-    googleClientId: environment.GOOGLE_CLIENT_ID || ""
+    googleClientId: environment.GOOGLE_CLIENT_ID || "",
+    smtpHost: environment.SMTP_HOST || "",
+    smtpPort: Number(environment.SMTP_PORT || 587),
+    smtpSecure: environment.SMTP_SECURE === "true",
+    smtpUser: environment.SMTP_USER || "",
+    smtpPassword: environment.SMTP_PASSWORD || "",
+    smtpFrom: environment.SMTP_FROM || ""
   };
 
   if (!Number.isInteger(config.port) || config.port < 1 || config.port > 65535) {
@@ -25,6 +31,10 @@ export function loadConfig(environment = process.env) {
 
   if (config.jwtSecret.length < 32) {
     throw new Error("JWT_SECRET must contain at least 32 characters.");
+  }
+
+  if (!Number.isInteger(config.smtpPort) || config.smtpPort < 1 || config.smtpPort > 65535) {
+    throw new Error("SMTP_PORT must be a valid TCP port.");
   }
 
   return Object.freeze(config);
