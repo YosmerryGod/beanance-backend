@@ -1,177 +1,290 @@
-const DEFAULT_PERIODS = Object.freeze({
+const DEFAULTS = Object.freeze({
   rsi: 14,
-  ema: 20,
   macdFast: 12,
   macdSlow: 26,
   macdSignal: 9,
   bollinger: 20,
-  atr: 14
+  atr: 14,
+  adx: 14,
+  stochastic: 14,
+  stochasticSignal: 3,
+  cci: 20,
+  mfi: 14,
+  roc: 12,
+  williamsR: 14,
+  supertrendMultiplier: 3
 });
 
-function number(value) {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : 0;
+function n(value) {
+  const result = Number(value);
+  return Number.isFinite(result) ? result : 0;
 }
 
-function average(values) {
-  if (!values.length) return null;
-  return values.reduce((sum, value) => sum + value, 0) / values.length;
+function mean(values) {
+  return values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null;
 }
 
-function emaSeries(values, period) {
+function sma(values, period) {
+  return values.map((_, index) => index + 1 < period
+    ? null
+    : mean(values.slice(index - period + 1, index + 1)));
+}
+
+function ema(values, period) {
   const output = Array(values.length).fill(null);
-  if (!Number.isInteger(period) || period < 1 || values.length < period) return output;
-
-  const multiplier = 2 / (period + 1);
-  let previous = average(values.slice(0, period));
+  if (values.length < period) return output;
+  let previous = mean(values.slice(0, period));
   output[period - 1] = previous;
-
-  for (let index = period; index < values.length; index += 1) {
-    previous = (values[index] - previous) * multiplier + previous;
-    output[index] = previous;
+  const alpha = 2 / (period + 1);
+  for (let i = period; i < values.length; i += 1) {
+    previous += alpha * (values[i] - previous);
+    output[i] = previous;
   }
-
   return output;
 }
 
-function rsiSeries(closes, period = DEFAULT_PERIODS.rsi) {
+function wilder(values, period) {
+  const output = Array(values.length).fill(null);
+  if (values.length < period) return output;
+  let current = mean(values.slice(0, period));
+  output[period - 1] = current;
+  for (let i = period; i < values.length; i += 1) {
+    current = ((current * (period - 1)) + values[i]) / period;
+    output[i] = current;
+  }
+  return output;
+}
+
+function rsi(closes, period) {
+  const gains = [];
+  const losses = [];
+  for (let i = 1; i < closes.length; i += 1) {
+    const change = closes[i] - closes[i - 1];
+    gains.push(Math.max(change, 0));
+    losses.push(Math.max(-change, 0));
+  }
+  const avgGain = wilder(gains, period);
+  const avgLoss = wilder(losses, period);
   const output = Array(closes.length).fill(null);
-  if (closes.length <= period || period < 1) return output;
-
-  let gains = 0;
-  let losses = 0;
-
-  for (let index = 1; index <= period; index += 1) {
-    const change = closes[index] - closes[index - 1];
-    gains += Math.max(change, 0);
-    losses += Math.max(-change, 0);
+  for (let i = 0; i < avgGain.length; i += 1) {
+    if (avgGain[i] === null || avgLoss[i] === null) continue;
+    output[i + 1] = avgLoss[i] === 0
+      ? (avgGain[i] === 0 ? 50 : 100)
+      : 100 - (100 / (1 + (avgGain[i] / avgLoss[i])));
   }
-
-  let averageGain = gains / period;
-  let averageLoss = losses / period;
-
-  const calculate = () => {
-    if (averageLoss === 0) return averageGain === 0 ? 50 : 100;
-    const relativeStrength = averageGain / averageLoss;
-    return 100 - (100 / (1 + relativeStrength));
-  };
-
-  output[period] = calculate();
-
-  for (let index = period + 1; index < closes.length; index += 1) {
-    const change = closes[index] - closes[index - 1];
-    averageGain = ((averageGain * (period - 1)) + Math.max(change, 0)) / period;
-    averageLoss = ((averageLoss * (period - 1)) + Math.max(-change, 0)) / period;
-    output[index] = calculate();
-  }
-
   return output;
 }
 
-function macdSeries(closes, fastPeriod, slowPeriod, signalPeriod) {
-  const fast = emaSeries(closes, fastPeriod);
-  const slow = emaSeries(closes, slowPeriod);
-  const macd = closes.map((_, index) => (
-    fast[index] === null || slow[index] === null ? null : fast[index] - slow[index]
+function macd(closes, fast, slow, signalPeriod) {
+  const fastLine = ema(closes, fast);
+  const slowLine = ema(closes, slow);
+  const line = closes.map((_, i) => (
+    fastLine[i] === null || slowLine[i] === null ? null : fastLine[i] - slowLine[i]
   ));
-
-  const validStart = macd.findIndex((value) => value !== null);
+  const first = line.findIndex((value) => value !== null);
   const signal = Array(closes.length).fill(null);
-
-  if (validStart >= 0) {
-    const compact = macd.slice(validStart).filter((value) => value !== null);
-    const compactSignal = emaSeries(compact, signalPeriod);
-    compactSignal.forEach((value, index) => {
-      signal[validStart + index] = value;
-    });
+  if (first >= 0) {
+    const compact = line.slice(first).filter((value) => value !== null);
+    const signalCompact = ema(compact, signalPeriod);
+    signalCompact.forEach((value, i) => { signal[first + i] = value; });
   }
-
-  const histogram = macd.map((value, index) => (
-    value === null || signal[index] === null ? null : value - signal[index]
-  ));
-
-  return { macd, signal, histogram };
+  return {
+    line,
+    signal,
+    histogram: line.map((value, i) => value === null || signal[i] === null ? null : value - signal[i])
+  };
 }
 
-function bollingerSeries(closes, period, multiplier = 2) {
-  return closes.map((_, index) => {
-    if (index + 1 < period) return null;
-
-    const window = closes.slice(index - period + 1, index + 1);
-    const middle = average(window);
-    const variance = window.reduce((sum, value) => sum + ((value - middle) ** 2), 0) / period;
+function bollinger(closes, period, multiplier = 2) {
+  return closes.map((_, i) => {
+    if (i + 1 < period) return null;
+    const window = closes.slice(i - period + 1, i + 1);
+    const middle = mean(window);
+    const variance = mean(window.map((value) => (value - middle) ** 2));
     const deviation = Math.sqrt(variance);
-
+    const upper = middle + multiplier * deviation;
+    const lower = middle - multiplier * deviation;
     return {
-      upper: middle + (multiplier * deviation),
-      middle,
-      lower: middle - (multiplier * deviation),
-      bandwidth: middle === 0 ? null : ((multiplier * deviation * 2) / middle) * 100
+      upper, middle, lower,
+      bandwidth: middle === 0 ? null : ((upper - lower) / middle) * 100,
+      percentB: upper === lower ? null : (closes[i] - lower) / (upper - lower)
     };
   });
 }
 
-function atrSeries(candles, period) {
-  const trueRanges = candles.map((candle, index) => {
-    if (index === 0) return candle.high - candle.low;
-
-    const previousClose = candles[index - 1].close;
+function trueRanges(candles) {
+  return candles.map((candle, i) => {
+    if (i === 0) return candle.high - candle.low;
+    const previous = candles[i - 1].close;
     return Math.max(
       candle.high - candle.low,
-      Math.abs(candle.high - previousClose),
-      Math.abs(candle.low - previousClose)
+      Math.abs(candle.high - previous),
+      Math.abs(candle.low - previous)
     );
   });
+}
 
-  const output = Array(candles.length).fill(null);
-  if (candles.length < period || period < 1) return output;
+function atr(candles, period) {
+  return wilder(trueRanges(candles), period);
+}
 
-  let current = average(trueRanges.slice(0, period));
-  output[period - 1] = current;
-
-  for (let index = period; index < candles.length; index += 1) {
-    current = ((current * (period - 1)) + trueRanges[index]) / period;
-    output[index] = current;
+function adx(candles, period) {
+  const plusDm = Array(candles.length).fill(0);
+  const minusDm = Array(candles.length).fill(0);
+  for (let i = 1; i < candles.length; i += 1) {
+    const up = candles[i].high - candles[i - 1].high;
+    const down = candles[i - 1].low - candles[i].low;
+    plusDm[i] = up > down && up > 0 ? up : 0;
+    minusDm[i] = down > up && down > 0 ? down : 0;
   }
-
+  const tr = wilder(trueRanges(candles), period);
+  const plusSmoothed = wilder(plusDm.slice(1), period);
+  const minusSmoothed = wilder(minusDm.slice(1), period);
+  const dx = Array(candles.length).fill(null);
+  for (let i = 1; i < candles.length; i += 1) {
+    const trValue = tr[i];
+    const plus = plusSmoothed[i - 1];
+    const minus = minusSmoothed[i - 1];
+    if (!trValue || plus === null || minus === null) continue;
+    const plusDi = (plus / trValue) * 100;
+    const minusDi = (minus / trValue) * 100;
+    const denominator = plusDi + minusDi;
+    dx[i] = denominator === 0 ? 0 : (Math.abs(plusDi - minusDi) / denominator) * 100;
+  }
+  const compactStart = dx.findIndex((value) => value !== null);
+  const output = Array(candles.length).fill(null);
+  if (compactStart >= 0) {
+    const compact = dx.slice(compactStart).filter((value) => value !== null);
+    const values = wilder(compact, period);
+    values.forEach((value, i) => { output[compactStart + i] = value; });
+  }
   return output;
 }
 
-function vwapSeries(candles) {
-  let cumulativePriceVolume = 0;
-  let cumulativeVolume = 0;
+function stochastic(candles, period, signalPeriod) {
+  const k = candles.map((candle, i) => {
+    if (i + 1 < period) return null;
+    const window = candles.slice(i - period + 1, i + 1);
+    const highest = Math.max(...window.map((item) => item.high));
+    const lowest = Math.min(...window.map((item) => item.low));
+    return highest === lowest ? 50 : ((candle.close - lowest) / (highest - lowest)) * 100;
+  });
+  const validStart = k.findIndex((value) => value !== null);
+  const d = Array(candles.length).fill(null);
+  if (validStart >= 0) {
+    const compact = k.slice(validStart).filter((value) => value !== null);
+    sma(compact, signalPeriod).forEach((value, i) => { d[validStart + i] = value; });
+  }
+  return { k, d };
+}
 
-  return candles.map((candle) => {
-    const typicalPrice = (candle.high + candle.low + candle.close) / 3;
-    cumulativePriceVolume += typicalPrice * candle.volume;
-    cumulativeVolume += candle.volume;
+function stochasticRsi(rsiValues, period, signalPeriod) {
+  const k = rsiValues.map((value, i) => {
+    if (value === null || i + 1 < period) return null;
+    const window = rsiValues.slice(i - period + 1, i + 1);
+    if (window.some((item) => item === null)) return null;
+    const high = Math.max(...window);
+    const low = Math.min(...window);
+    return high === low ? 50 : ((value - low) / (high - low)) * 100;
+  });
+  const start = k.findIndex((value) => value !== null);
+  const d = Array(k.length).fill(null);
+  if (start >= 0) {
+    const compact = k.slice(start).filter((value) => value !== null);
+    sma(compact, signalPeriod).forEach((value, i) => { d[start + i] = value; });
+  }
+  return { k, d };
+}
 
-    return cumulativeVolume === 0 ? null : cumulativePriceVolume / cumulativeVolume;
+function cci(candles, period) {
+  return candles.map((candle, i) => {
+    if (i + 1 < period) return null;
+    const typical = candles.slice(i - period + 1, i + 1)
+      .map((item) => (item.high + item.low + item.close) / 3);
+    const avg = mean(typical);
+    const deviation = mean(typical.map((value) => Math.abs(value - avg)));
+    const current = (candle.high + candle.low + candle.close) / 3;
+    return deviation === 0 ? 0 : (current - avg) / (0.015 * deviation);
   });
 }
 
-function orderFlowSeries(candles) {
-  let cumulativeDelta = 0;
+function mfi(candles, period) {
+  const positive = Array(candles.length).fill(0);
+  const negative = Array(candles.length).fill(0);
+  for (let i = 1; i < candles.length; i += 1) {
+    const currentTypical = (candles[i].high + candles[i].low + candles[i].close) / 3;
+    const previousTypical = (candles[i - 1].high + candles[i - 1].low + candles[i - 1].close) / 3;
+    const flow = currentTypical * candles[i].volume;
+    if (currentTypical > previousTypical) positive[i] = flow;
+    if (currentTypical < previousTypical) negative[i] = flow;
+  }
+  return candles.map((_, i) => {
+    if (i < period) return null;
+    const pos = positive.slice(i - period + 1, i + 1).reduce((a, b) => a + b, 0);
+    const neg = negative.slice(i - period + 1, i + 1).reduce((a, b) => a + b, 0);
+    return neg === 0 ? (pos === 0 ? 50 : 100) : 100 - (100 / (1 + pos / neg));
+  });
+}
 
+function obv(candles) {
+  let value = 0;
+  return candles.map((candle, i) => {
+    if (i > 0) {
+      if (candle.close > candles[i - 1].close) value += candle.volume;
+      else if (candle.close < candles[i - 1].close) value -= candle.volume;
+    }
+    return value;
+  });
+}
+
+function vwap(candles) {
+  let priceVolume = 0;
+  let volume = 0;
   return candles.map((candle) => {
-    const totalQuoteVolume = candle.quoteVolume;
-    const takerBuyQuoteVolume = candle.takerBuyQuoteVolume;
+    const typical = (candle.high + candle.low + candle.close) / 3;
+    priceVolume += typical * candle.volume;
+    volume += candle.volume;
+    return volume === 0 ? null : priceVolume / volume;
+  });
+}
 
-    // Binance kline taker-buy quote volume is used to estimate buyer-initiated flow.
-    const buyVolume = takerBuyQuoteVolume;
-    const sellVolume = Math.max(totalQuoteVolume - takerBuyQuoteVolume, 0);
+function orderFlow(candles) {
+  let cumulativeDelta = 0;
+  return candles.map((candle) => {
+    const buyVolume = candle.takerBuyQuoteVolume;
+    const sellVolume = Math.max(candle.quoteVolume - buyVolume, 0);
     const delta = buyVolume - sellVolume;
-
     cumulativeDelta += delta;
-
     return {
-      buyVolume,
-      sellVolume,
-      delta,
-      cumulativeDelta,
-      buySellRatio: sellVolume === 0 ? null : buyVolume / sellVolume
+      buyVolume, sellVolume, delta, cumulativeDelta,
+      buySellRatio: sellVolume === 0 ? null : buyVolume / sellVolume,
+      deltaPercent: candle.quoteVolume === 0 ? null : (delta / candle.quoteVolume) * 100
     };
   });
+}
+
+function supertrend(candles, atrValues, multiplier) {
+  const output = Array(candles.length).fill(null);
+  let trend = 1;
+  let upperBand = null;
+  let lowerBand = null;
+  for (let i = 0; i < candles.length; i += 1) {
+    if (atrValues[i] === null) continue;
+    const midpoint = (candles[i].high + candles[i].low) / 2;
+    const basicUpper = midpoint + multiplier * atrValues[i];
+    const basicLower = midpoint - multiplier * atrValues[i];
+    upperBand = upperBand === null || basicUpper < upperBand || candles[i - 1]?.close > upperBand
+      ? basicUpper : upperBand;
+    lowerBand = lowerBand === null || basicLower > lowerBand || candles[i - 1]?.close < lowerBand
+      ? basicLower : lowerBand;
+    if (candles[i].close > upperBand) trend = 1;
+    else if (candles[i].close < lowerBand) trend = -1;
+    output[i] = {
+      value: trend === 1 ? lowerBand : upperBand,
+      direction: trend === 1 ? "bullish" : "bearish"
+    };
+  }
+  return output;
 }
 
 export function calculateIndicators(inputCandles, options = {}) {
@@ -182,23 +295,28 @@ export function calculateIndicators(inputCandles, options = {}) {
   }
 
   const periods = {
-    rsi: options.rsiPeriod ?? DEFAULT_PERIODS.rsi,
-    ema: options.emaPeriod ?? DEFAULT_PERIODS.ema,
-    macdFast: options.macdFast ?? DEFAULT_PERIODS.macdFast,
-    macdSlow: options.macdSlow ?? DEFAULT_PERIODS.macdSlow,
-    macdSignal: options.macdSignal ?? DEFAULT_PERIODS.macdSignal,
-    bollinger: options.bollingerPeriod ?? DEFAULT_PERIODS.bollinger,
-    atr: options.atrPeriod ?? DEFAULT_PERIODS.atr
+    rsi: options.rsiPeriod ?? DEFAULTS.rsi,
+    macdFast: options.macdFast ?? DEFAULTS.macdFast,
+    macdSlow: options.macdSlow ?? DEFAULTS.macdSlow,
+    macdSignal: options.macdSignal ?? DEFAULTS.macdSignal,
+    bollinger: options.bollingerPeriod ?? DEFAULTS.bollinger,
+    atr: options.atrPeriod ?? DEFAULTS.atr,
+    adx: options.adxPeriod ?? DEFAULTS.adx,
+    stochastic: options.stochasticPeriod ?? DEFAULTS.stochastic,
+    stochasticSignal: options.stochasticSignal ?? DEFAULTS.stochasticSignal,
+    cci: options.cciPeriod ?? DEFAULTS.cci,
+    mfi: options.mfiPeriod ?? DEFAULTS.mfi,
+    roc: options.rocPeriod ?? DEFAULTS.roc,
+    williamsR: options.williamsRPeriod ?? DEFAULTS.williamsR
   };
 
-  for (const [name, value] of Object.entries(periods)) {
-    if (!Number.isInteger(value) || value < 1 || value > 200) {
-      const error = new Error(`${name} period must be an integer between 1 and 200.`);
+  for (const [name, period] of Object.entries(periods)) {
+    if (!Number.isInteger(period) || period < 2 || period > 200) {
+      const error = new Error(`${name} period must be an integer between 2 and 200.`);
       error.statusCode = 400;
       throw error;
     }
   }
-
   if (periods.macdFast >= periods.macdSlow) {
     const error = new Error("MACD fast period must be lower than MACD slow period.");
     error.statusCode = 400;
@@ -206,57 +324,86 @@ export function calculateIndicators(inputCandles, options = {}) {
   }
 
   const candles = inputCandles.map((item) => ({
-    openTime: number(item.openTime),
-    closeTime: number(item.closeTime),
-    open: number(item.open),
-    high: number(item.high),
-    low: number(item.low),
-    close: number(item.close),
-    volume: number(item.volume),
-    quoteVolume: number(item.quoteVolume),
-    takerBuyBaseVolume: number(item.takerBuyBaseVolume),
-    takerBuyQuoteVolume: number(item.takerBuyQuoteVolume)
+    openTime: n(item.openTime), closeTime: n(item.closeTime),
+    open: n(item.open), high: n(item.high), low: n(item.low),
+    close: n(item.close), volume: n(item.volume),
+    quoteVolume: n(item.quoteVolume),
+    takerBuyBaseVolume: n(item.takerBuyBaseVolume),
+    takerBuyQuoteVolume: n(item.takerBuyQuoteVolume)
   }));
 
   const closes = candles.map((item) => item.close);
-  const ema = emaSeries(closes, periods.ema);
-  const rsi = rsiSeries(closes, periods.rsi);
-  const macd = macdSeries(closes, periods.macdFast, periods.macdSlow, periods.macdSignal);
-  const bollinger = bollingerSeries(closes, periods.bollinger);
-  const atr = atrSeries(candles, periods.atr);
-  const vwap = vwapSeries(candles);
-  const orderFlow = orderFlowSeries(candles);
+  const rsiValues = rsi(closes, periods.rsi);
+  const macdValues = macd(closes, periods.macdFast, periods.macdSlow, periods.macdSignal);
+  const atrValues = atr(candles, periods.atr);
+  const stoch = stochastic(candles, periods.stochastic, periods.stochasticSignal);
+  const stochRsi = stochasticRsi(rsiValues, periods.stochastic, periods.stochasticSignal);
+  const bands = bollinger(closes, periods.bollinger);
+  const adxValues = adx(candles, periods.adx);
+  const cciValues = cci(candles, periods.cci);
+  const mfiValues = mfi(candles, periods.mfi);
+  const obvValues = obv(candles);
+  const vwapValues = vwap(candles);
+  const flow = orderFlow(candles);
+  const trend = supertrend(candles, atrValues, n(options.supertrendMultiplier ?? DEFAULTS.supertrendMultiplier));
+  const emaPeriods = [9, 21, 50, 100, 200];
+  const emaValues = Object.fromEntries(emaPeriods.map((period) => [`ema${period}`, ema(closes, period)]));
+  const smaPeriods = [20, 50, 100, 200];
+  const smaValues = Object.fromEntries(smaPeriods.map((period) => [`sma${period}`, sma(closes, period)]));
 
-  const data = candles.map((candle, index) => ({
-    ...candle,
-    indicators: {
-      ema: ema[index],
-      rsi: rsi[index],
-      macd: macd.macd[index],
-      macdSignal: macd.signal[index],
-      macdHistogram: macd.histogram[index],
-      bollinger: bollinger[index],
-      atr: atr[index],
-      vwap: vwap[index],
-      ...orderFlow[index]
-    }
-  }));
-
-  const latest = data[data.length - 1];
+  const rows = candles.map((candle, i) => {
+    const rocBase = closes[i - periods.roc];
+    const highest = i + 1 < periods.williamsR ? null : Math.max(...candles.slice(i - periods.williamsR + 1, i + 1).map((item) => item.high));
+    const lowest = i + 1 < periods.williamsR ? null : Math.min(...candles.slice(i - periods.williamsR + 1, i + 1).map((item) => item.low));
+    return {
+      ...candle,
+      indicators: {
+        ...Object.fromEntries(emaPeriods.map((period) => [`ema${period}`, emaValues[`ema${period}`][i]])),
+        ...Object.fromEntries(smaPeriods.map((period) => [`sma${period}`, smaValues[`sma${period}`][i]])),
+        rsi: rsiValues[i],
+        macd: macdValues.line[i],
+        macdSignal: macdValues.signal[i],
+        macdHistogram: macdValues.histogram[i],
+        bollinger: bands[i],
+        atr: atrValues[i],
+        atrPercent: atrValues[i] === null || candle.close === 0 ? null : (atrValues[i] / candle.close) * 100,
+        adx: adxValues[i],
+        stochastic: { k: stoch.k[i], d: stoch.d[i] },
+        stochasticRsi: { k: stochRsi.k[i], d: stochRsi.d[i] },
+        cci: cciValues[i],
+        mfi: mfiValues[i],
+        obv: obvValues[i],
+        vwap: vwapValues[i],
+        roc: i < periods.roc || rocBase === 0 ? null : ((candle.close - rocBase) / rocBase) * 100,
+        momentum: i < periods.roc ? null : candle.close - rocBase,
+        williamsR: highest === null || highest === lowest ? null : ((highest - candle.close) / (highest - lowest)) * -100,
+        supertrend: trend[i],
+        ...flow[i]
+      }
+    };
+  });
 
   return {
-    count: data.length,
+    count: rows.length,
     periods,
     methodology: {
       rsi: "Wilder RSI",
-      ema: "Exponential moving average",
+      ema: "Exponential moving average; SMA-seeded",
       macd: "EMA fast minus EMA slow; EMA signal",
-      bollinger: "Simple moving average with population standard deviation",
+      bollinger: "SMA with population standard deviation",
       atr: "Wilder smoothed true range",
-      vwap: "Cumulative typical-price volume weighted average",
-      cvd: "Estimated from Binance kline taker-buy quote volume; not aggressor trade-by-trade reconstruction"
+      adx: "Wilder directional movement index",
+      stochastic: "%K and SMA %D",
+      stochasticRsi: "Stochastic transform of Wilder RSI",
+      cci: "Typical price and mean absolute deviation",
+      mfi: "Money Flow Index using typical price and base volume",
+      obv: "On-Balance Volume",
+      vwap: "Cumulative typical-price VWAP across returned candle window",
+      cvd: "Estimated from Binance kline taker-buy quote volume; not trade-by-trade aggressor reconstruction",
+      supertrend: "ATR bands with direction switching",
+      volumeDelta: "Taker-buy quote volume minus estimated taker-sell quote volume"
     },
-    latest: latest.indicators,
-    candles: data
+    latest: rows[rows.length - 1].indicators,
+    candles: rows
   };
 }
