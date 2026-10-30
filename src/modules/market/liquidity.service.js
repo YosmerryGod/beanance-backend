@@ -5,7 +5,7 @@ const WS = "wss://fstream.binance.com/ws";
 const MAX_TRADES = 2000;
 const MAX_DEPTH_LEVELS = 100;
 const MAX_HEATMAP_POINTS = 240;
-const SNAPSHOT_INTERVAL_MS = 1000;
+const SNAPSHOT_INTERVAL_MS = 5000;
 
 function serviceError(message, statusCode = 502) {
   const error = new Error(message);
