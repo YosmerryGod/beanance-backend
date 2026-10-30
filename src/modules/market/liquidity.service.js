@@ -30,9 +30,26 @@ function numericLevels(levels) {
   })).filter((level) => Number.isFinite(level.price) && Number.isFinite(level.quantity) && level.quantity > 0);
 }
 
-export function createLiquidityService(logger) {
+export function createLiquidityService(logger, database) {
   const sessions = new Map();
   let stopped = false;
+  const insertTrade = database.prepare("INSERT OR IGNORE INTO market_agg_trades (symbol, trade_id, price, quantity, quote_volume, side, trade_time) VALUES (?, ?, ?, ?, ?, ?, ?)");
+  const updateCvdState = database.prepare("INSERT INTO market_cvd_state (symbol, cumulative_delta, buy_quote_volume, sell_quote_volume, last_trade_id, last_trade_time, updated_at) VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP) ON CONFLICT(symbol) DO UPDATE SET cumulative_delta = excluded.cumulative_delta, buy_quote_volume = excluded.buy_quote_volume, sell_quote_volume = excluded.sell_quote_volume, last_trade_id = excluded.last_trade_id, last_trade_time = excluded.last_trade_time, updated_at = CURRENT_TIMESTAMP");
+  const insertSnapshot = database.prepare("INSERT INTO market_liquidity_snapshots (symbol, last_update_id, captured_at, bids_json, asks_json) VALUES (?, ?, ?, ?, ?)");
+  const loadCvdState = database.prepare("SELECT * FROM market_cvd_state WHERE symbol = ?");
+  const loadTrades = database.prepare("SELECT trade_id AS tradeId, price, quantity, quote_volume AS quoteVolume, side, trade_time AS timestamp FROM market_agg_trades WHERE symbol = ? ORDER BY trade_time DESC, trade_id DESC LIMIT ?");
+  const loadSnapshots = database.prepare("SELECT captured_at AS timestamp, last_update_id AS lastUpdateId, bids_json, asks_json FROM market_liquidity_snapshots WHERE symbol = ? ORDER BY captured_at DESC LIMIT ?");
+  const cleanupOldHistory = database.prepare("DELETE FROM market_liquidity_snapshots WHERE captured_at < ?");
+  const cleanupOldTrades = database.prepare("DELETE FROM market_agg_trades WHERE trade_time < ?");
+  const persistTrade = database.transaction((session, point) => {
+    const inserted = insertTrade.run(session.symbol, point.tradeId, point.price, point.quantity, point.quoteVolume, point.side, point.timestamp);
+    if (inserted.changes === 0) return false;
+    if (point.side === "buy") { session.buyVolume += point.quoteVolume; session.cvd += point.quoteVolume; }
+    else { session.sellVolume += point.quoteVolume; session.cvd -= point.quoteVolume; }
+    updateCvdState.run(session.symbol, session.cvd, session.buyVolume, session.sellVolume, point.tradeId, point.timestamp);
+    return true;
+  });
+  let lastCleanupAt = 0;
 
   function createSession(symbol) {
     const session = {
@@ -57,6 +74,15 @@ export function createLiquidityService(logger) {
       heatmap: [],
       startedAt: new Date().toISOString()
     };
+    const savedState = loadCvdState.get(symbol);
+    if (savedState) {
+      session.cvd = Number(savedState.cumulative_delta);
+      session.buyVolume = Number(savedState.buy_quote_volume);
+      session.sellVolume = Number(savedState.sell_quote_volume);
+      session.lastTradeAt = savedState.last_trade_time ? new Date(savedState.last_trade_time).toISOString() : null;
+    }
+    session.trades = loadTrades.all(symbol, MAX_TRADES).reverse().map((trade) => ({ ...trade, tradeId: Number(trade.tradeId), timestamp: Number(trade.timestamp) }));
+    session.heatmap = loadSnapshots.all(symbol, MAX_HEATMAP_POINTS).reverse().map((point) => ({ timestamp: Number(point.timestamp), lastUpdateId: Number(point.lastUpdateId), bids: JSON.parse(point.bids_json), asks: JSON.parse(point.asks_json) }));
     sessions.set(symbol, session);
     connectAggTrades(session);
     connectDepth(session);
@@ -101,22 +127,8 @@ export function createLiquidityService(logger) {
         // Binance "m" means buyer is maker, therefore the aggressive side is sell.
         const side = trade.m ? "sell" : "buy";
         const quoteVolume = price * quantity;
-        if (side === "buy") {
-          session.buyVolume += quoteVolume;
-          session.cvd += quoteVolume;
-        } else {
-          session.sellVolume += quoteVolume;
-          session.cvd -= quoteVolume;
-        }
-
-        const point = {
-          tradeId: trade.a,
-          price,
-          quantity,
-          quoteVolume,
-          side,
-          timestamp: trade.T
-        };
+        const point = { tradeId: Number(trade.a), price, quantity, quoteVolume, side, timestamp: Number(trade.T) };
+        if (!persistTrade(session, point)) return;
         session.trades.push(point);
         if (session.trades.length > MAX_TRADES) session.trades.splice(0, session.trades.length - MAX_TRADES);
         session.lastTradeAt = new Date(trade.T).toISOString();
@@ -258,12 +270,19 @@ export function createLiquidityService(logger) {
     };
     session.heatmap.push(point);
     if (session.heatmap.length > MAX_HEATMAP_POINTS) session.heatmap.shift();
+    insertSnapshot.run(session.symbol, point.lastUpdateId, point.timestamp, JSON.stringify(point.bids), JSON.stringify(point.asks));
+    if (point.timestamp - lastCleanupAt > 60 * 60 * 1000) {
+      const cutoff = point.timestamp - 7 * 24 * 60 * 60 * 1000;
+      cleanupOldHistory.run(cutoff);
+      cleanupOldTrades.run(cutoff);
+      lastCleanupAt = point.timestamp;
+    }
   }
 
   function getCvd(symbol, limit = 200) {
     const session = getSession(symbol);
     const safeLimit = Math.min(Math.max(Number(limit) || 200, 1), MAX_TRADES);
-    const trades = session.trades.slice(-safeLimit);
+    const trades = loadTrades.all(session.symbol, safeLimit).reverse().map((trade) => ({ ...trade, tradeId: Number(trade.tradeId), timestamp: Number(trade.timestamp) }));
     const delta = trades.reduce((sum, trade) => sum + (trade.side === "buy" ? trade.quoteVolume : -trade.quoteVolume), 0);
     return {
       symbol: session.symbol,
@@ -306,8 +325,9 @@ export function createLiquidityService(logger) {
       source: "binance_diff_depth_100ms",
       synchronized: session.depthReady,
       unit: "base_asset_quantity",
-      points: session.heatmap.slice(-safeLimit),
-      note: "In-memory depth snapshots captured on initial sync and depth resynchronization; this is not historical exchange data."
+      points: loadSnapshots.all(session.symbol, safeLimit).reverse().map((point) => ({ timestamp: Number(point.timestamp), lastUpdateId: Number(point.lastUpdateId), bids: JSON.parse(point.bids_json), asks: JSON.parse(point.asks_json) })),
+      retention: "7 days",
+      note: "Depth snapshots are stored in SQLite and retained for up to seven days."
     };
   }
 
