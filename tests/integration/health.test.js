@@ -5,7 +5,9 @@ import { buildApp } from "../../src/app.js";
 test("GET /api/v1/health returns service status", async (t) => {
   const app = await buildApp({
     nodeEnv: "test",
-    databasePath: ":memory:"
+    databasePath: ":memory:",
+    jwtSecret: "test-secret-with-at-least-thirty-two-characters",
+    googleClientId: ""
   });
 
   t.after(async () => {
