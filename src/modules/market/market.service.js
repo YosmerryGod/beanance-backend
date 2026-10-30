@@ -1,4 +1,5 @@
 import WebSocket from "ws";
+import { createLiquidityService } from "./liquidity.service.js";
 
 const BINANCE_FUTURES_REST = "https://fapi.binance.com";
 const BINANCE_FUTURES_MARKET_WS = "wss://fstream.binance.com/market/stream?streams=!ticker@arr";
@@ -39,6 +40,7 @@ function normalizeTicker(ticker) {
 export function createMarketService(logger) {
   const markets = new Map();
   const activeSymbols = new Set();
+  const liquidityService = createLiquidityService(logger);
 
   let socket = null;
   let reconnectTimer = null;
@@ -360,6 +362,7 @@ export function createMarketService(logger) {
 
   function close() {
     stopped = true;
+    liquidityService.close();
 
     if (reconnectTimer) clearTimeout(reconnectTimer);
     if (refreshTimer) clearInterval(refreshTimer);
@@ -383,6 +386,10 @@ export function createMarketService(logger) {
     getMarket,
     getKlines,
     getFuturesAnalytics,
+    getCvd: liquidityService.getCvd,
+    getOrderBook: liquidityService.getOrderBook,
+    getLiquidityHeatmap: liquidityService.getLiquidityHeatmap,
+    getLiquidityStatus: liquidityService.getStatus,
     getStatus
   };
 }
