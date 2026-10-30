@@ -165,6 +165,7 @@ Owning a strategy token does not automatically imply ownership of the strategy, 
 - [x] Add versioned health endpoint
 - [x] Add initial automated tests
 - [ ] Add database migrations
+- [x] Implement email verification for registration and password changes
 - [x] Implement email/password registration and login
 - [x] Add Google ID-token sign-in
 - [x] Add JWT authentication and current-user endpoint
@@ -181,14 +182,17 @@ Base path: `/api/v1/auth`
 
 | Method | Endpoint | Purpose |
 | --- | --- | --- |
-| POST | `/register` | Create an email/password account |
+| POST | `/register` | Start email registration and send a verification code |
+| POST | `/register/verify` | Verify the code and create the account |
 | POST | `/login` | Sign in with email/password |
 | POST | `/google` | Verify a Google ID token and sign in |
 | GET | `/me` | Return the authenticated user's profile |
 
 For Google sign-in, configure `GOOGLE_CLIENT_ID`. The frontend obtains an ID token using Google Identity Services and sends it to `POST /api/v1/auth/google` as `{ "idToken": "..." }`. The backend verifies the token, its audience, and the Google account's verified email.
 
-Email registration accepts an email and a password of at least 8 characters. The backend generates a random username and stores the password as a bcrypt hash. Password hashes are never returned by the API.
+Email registration is a two-step process. `POST /register` sends a six-digit code to the supplied email. `POST /register/verify` completes registration only after the code is verified. Codes expire after 10 minutes and allow at most five incorrect attempts. The backend generates a random username and stores the password as a bcrypt hash. Password hashes and verification-code hashes are never returned by the API.
+
+Configure `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASSWORD`, and `SMTP_FROM` to enable email delivery. Email registration and password changes return a service-unavailable error until SMTP is configured.
 
 Successful authentication returns a JWT that expires after 7 days. Protected requests must include `Authorization: Bearer <jwt>`. Set a strong random `JWT_SECRET` with at least 32 characters before deployment. Google sign-in remains disabled until `GOOGLE_CLIENT_ID` is configured.
 
@@ -200,11 +204,12 @@ All profile-management endpoints require a valid JWT in the `Authorization: Bear
 | --- | --- | --- |
 | GET | `/api/v1/auth/me` | Read the current profile |
 | PATCH | `/api/v1/auth/profile` | Update username and/or avatar URL |
-| PUT | `/api/v1/auth/password` | Create or change account password |
+| POST | `/api/v1/auth/password/request-code` | Request an email verification code |
+| POST | `/api/v1/auth/password/verify-code` | Confirm code and save the new password |
 
 Profile updates accept `username` (3–20 letters, numbers, or underscores) and `avatarUrl` (an absolute URL or `null` to clear the photo). Usernames must be unique.
 
-Password updates accept `newPassword` (at least 8 characters). Email/password accounts must also provide `currentPassword`. Google-only accounts can create a password without a current password; after doing so, the account is marked as supporting both Google and password sign-in. Passwords are stored as bcrypt hashes.
+Password changes require two steps. First call `/password/request-code` with `newPassword`; email/password accounts must also provide `currentPassword`. A six-digit code is sent to the account email. Then call `/password/verify-code` with the code to commit the change. Google-only accounts can create a password without a current password, but must verify the email code. After creating a password, the account supports both Google and password sign-in. Codes expire after 10 minutes and allow at most five incorrect attempts. Passwords are stored as bcrypt hashes.
 
 ## Risk Disclaimer
 
