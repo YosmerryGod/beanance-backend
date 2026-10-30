@@ -7,6 +7,7 @@ import { registerRoutes } from "./routes/index.js";
 import { createDatabase } from "./db/index.js";
 import { createAuthService } from "./modules/auth/auth.service.js";
 import { createEmailSender } from "./modules/auth/email.service.js";
+import { createWalletService } from "./modules/wallet/wallet.service.js";
 
 export async function buildApp(config) {
   const fastify = Fastify({
@@ -21,6 +22,7 @@ export async function buildApp(config) {
   const emailSender = config.emailSender || createEmailSender(config);
 
   fastify.decorate("database", database);
+  fastify.decorate("walletService", createWalletService(database, config.walletEncryptionKey));
   fastify.decorate(
     "authService",
     createAuthService(
