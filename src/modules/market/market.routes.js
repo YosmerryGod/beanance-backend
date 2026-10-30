@@ -181,6 +181,62 @@ export async function marketRoutes(fastify) {
     request.query.limit
   ));
 
+  // Live CVD built from individual Binance aggregate trades.
+  fastify.get("/markets/:symbol/cvd", {
+    schema: {
+      params: {
+        type: "object",
+        required: ["symbol"],
+        properties: {
+          symbol: { type: "string", minLength: 3, maxLength: 30, pattern: "^[A-Za-z0-9_]+$" }
+        }
+      },
+      querystring: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          limit: { type: "integer", minimum: 1, maximum: 2000, default: 200 }
+        }
+      }
+    }
+  }, async (request) => market.getCvd(request.params.symbol, request.query.limit));
+
+  // Locally synchronized order book from Binance diff-depth events.
+  fastify.get("/markets/:symbol/order-book", {
+    schema: {
+      params: {
+        type: "object",
+        required: ["symbol"],
+        properties: {
+          symbol: { type: "string", minLength: 3, maxLength: 30, pattern: "^[A-Za-z0-9_]+$" }
+        }
+      }
+    }
+  }, async (request) => market.getOrderBook(request.params.symbol));
+
+  // Rolling in-memory liquidity depth snapshots for heatmap rendering.
+  fastify.get("/markets/:symbol/liquidity-heatmap", {
+    schema: {
+      params: {
+        type: "object",
+        required: ["symbol"],
+        properties: {
+          symbol: { type: "string", minLength: 3, maxLength: 30, pattern: "^[A-Za-z0-9_]+$" }
+        }
+      },
+      querystring: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          limit: { type: "integer", minimum: 1, maximum: 240, default: 120 }
+        }
+      }
+    }
+  }, async (request) => market.getLiquidityHeatmap(request.params.symbol, request.query.limit));
+
+  // Diagnostics for per-symbol aggTrade and diff-depth streams.
+  fastify.get("/liquidity-status", async () => market.getLiquidityStatus());
+
   // Public diagnostics for the upstream market data connection.
   fastify.get("/status", async () => market.getStatus());
 }
